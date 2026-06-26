@@ -52,3 +52,23 @@ def test_adx_bounds(trending_df):
 def test_zscore_mean_zero(trending_df):
     z = ind.rolling_zscore(trending_df["close"], 20).dropna()
     assert np.isfinite(z).all()
+
+
+def test_macd_hist_equals_line_minus_signal(trending_df):
+    line, sig, hist = ind.macd(trending_df["close"], 12, 26, 9)
+    d = pd.concat([line, sig, hist], axis=1).dropna()
+    assert np.allclose(d.iloc[:, 2], d.iloc[:, 0] - d.iloc[:, 1])
+
+
+def test_keltner_ordering(trending_df):
+    mid, up, low = ind.keltner(trending_df, 20, 10, 1.5)
+    d = pd.concat([mid, up, low], axis=1).dropna()
+    assert (d.iloc[:, 1] > d.iloc[:, 0]).all()
+    assert (d.iloc[:, 0] > d.iloc[:, 2]).all()
+
+
+def test_dual_thrust_range_positive_and_no_lookahead(trending_df):
+    rng = ind.dual_thrust_range(trending_df, 4).dropna()
+    assert (rng >= 0).all()
+    # value at t uses only bars < t (shifted) -> first 4 are NaN
+    assert ind.dual_thrust_range(trending_df, 4).iloc[:4].isna().all()

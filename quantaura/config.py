@@ -35,7 +35,7 @@ class Settings:
     telegram_allowed_users: list[int] = field(default_factory=list)
     telegram_broadcast_chat_id: str = ""
     account_equity: float = 10_000.0
-    ccxt_exchange: str = "binance"
+    ccxt_exchange: str = "toobit"
 
     # ------------------------------------------------------------------
     @classmethod
@@ -62,7 +62,7 @@ class Settings:
             telegram_allowed_users=allowed,
             telegram_broadcast_chat_id=os.getenv("TELEGRAM_BROADCAST_CHAT_ID", "").strip(),
             account_equity=equity,
-            ccxt_exchange=os.getenv("CCXT_EXCHANGE", "binance").strip() or "binance",
+            ccxt_exchange=os.getenv("CCXT_EXCHANGE", "toobit").strip() or "toobit",
         )
 
     # --- convenient typed accessors ----------------------------------

@@ -64,3 +64,18 @@ def test_scan_symbol_short_history_returns_empty(monkeypatch, settings):
     monkeypatch.setattr(engine.data_mod, "get_ohlcv", lambda *a, **k: short)
     out = engine.scan_symbol("FAKE", AssetClass.STOCK, settings, publish_only=False)
     assert out == []
+
+
+def test_scan_factor_builds_signals(monkeypatch, settings):
+    # distinct trend per symbol so ranking is non-degenerate
+    def fake(symbol, asset_class, **k):
+        h = (abs(hash(symbol)) % 7) - 3
+        return _rising(n=400, seed=100 + h)
+    monkeypatch.setattr(engine.data_mod, "get_ohlcv", fake)
+    sigs = engine.scan_factor(settings, publish_only=False)
+    assert any(s.strategy == "factor_momentum" for s in sigs)
+    for s in sigs:
+        assert s.is_valid_geometry()
+        assert s.risk_per_unit > 0
+        assert 0.0 <= s.confidence <= 1.0
+        assert s.regime == "cross-sectional"

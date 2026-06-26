@@ -27,9 +27,13 @@ edges are:
 
 | Strategy | Family | Edge source | Horizon |
 |---|---|---|---|
-| **Trend breakout** | Time-series momentum / trend following | Persistence of price moves (the most robust cross-asset anomaly; the core of CTAs like Man AHL) | weeks–months |
+| **Trend breakout (Donchian/Turtle)** | Time-series momentum / trend following | Persistence of price moves (the most robust cross-asset anomaly; the core of CTAs like Man AHL) | weeks–months |
+| **MACD trend** | Momentum | Trend-aligned momentum acceleration | weeks |
+| **Dual Thrust** | Range breakout | Volatility-scaled breakout of the prior range (Michael Chalek) | days |
+| **TTM Squeeze** | Volatility breakout | Energy released after a volatility compression (John Carter) | days–weeks |
 | **Mean reversion** | Short-horizon reversal | Temporary supply/demand imbalances revert to fair value | days |
 | **Pairs / stat-arb** | Statistical arbitrage | Cointegrated assets converge after diverging | days–weeks |
+| **Cross-sectional momentum** | Factor investing | Winners keep winning vs. losers (Jegadeesh–Titman / AQR) | weeks–months |
 
 Everything QuantAura does maps onto the standard quant pipeline:
 **data → signal research → backtest → execution → risk management.** We
@@ -57,9 +61,33 @@ reversion). Only trades pairs that are statistically cointegrated
 (p ≤ 0.05). Long the cheap leg, short the rich leg; exit toward the mean,
 stop on a structural break (z ≥ 3.5).
 
+**4. MACD trend.** Go long when the MACD line crosses *above* its signal
+line while price is above the 200-MA (mirror for shorts). ATR stop, 2R
+target. A classic, widely-used momentum trigger.
+
+**5. Dual Thrust (Michael Chalek).** `Range = max(HH−LC, HC−LL)` over the
+prior N bars; `BuyLine = Open + K1·Range`, `SellLine = Open − K2·Range`.
+Break above BuyLine → long, below SellLine → short, with a 200-MA
+trend filter to avoid whipsaw. ([formula reference](https://www.quantconnect.com/research/15258/dual-thrust-trading-algorithm/),
+[fmz writeup](https://github.com/fmzquant/strategies/blob/master/Dual-Thrust-Trading-Algorithm-ps4.md))
+
+**6. TTM Squeeze (John Carter).** When Bollinger Bands contract *inside*
+the Keltner channels, volatility is compressed (a "squeeze"). When it
+releases, price tends to expand sharply — we enter in the direction of the
+release with a tight 1.5×ATR stop and a wider 3R target.
+
+**7. Cross-sectional momentum (the "momentum factor").** Within each asset
+class, rank names by trailing ~6-month return (skipping the last month to
+avoid short-term reversal); go **long the strongest, short the weakest**.
+This is the Jegadeesh–Titman (1993) momentum factor used at scale by AQR
+and others. It is validated by a **panel (long-short basket) backtest**,
+not a per-symbol one.
+
 A **regime filter (ADX)** decides which engine is even allowed to fire on a
-symbol: trending markets → momentum, ranging markets → mean reversion. This
-stops the two engines from fighting each other.
+symbol: trending markets → the momentum/breakout engines (trend, MACD, dual
+thrust, squeeze), ranging markets → mean reversion. This stops the engines
+from fighting each other. Pairs and the momentum factor are relative-value
+strategies and run independently of the single-symbol regime.
 
 ### How signals stay honest — the backtest gate
 
@@ -131,6 +159,7 @@ python -m quantaura signal AAPL
 python -m quantaura signal EURUSD=X
 python -m quantaura signal BTC/USDT
 python -m quantaura pairs
+python -m quantaura factor
 
 # 3) Start the Telegram bot
 python -m quantaura bot
@@ -144,6 +173,7 @@ python -m quantaura bot
 | `/scan [stocks\|forex\|crypto\|all]` | scan the universe, push gated signals |
 | `/signal SYMBOL` | analyse one symbol now (e.g. `/signal AAPL`) |
 | `/pairs` | scan the cointegration pairs |
+| `/factor` | scan the cross-sectional momentum factor |
 | `/status` | show the active configuration |
 
 A signal card shows side, entry/stop/target, R:R, ATR, suggested size and
@@ -153,7 +183,7 @@ bar derived from that backtest.
 ## Data sources
 
 - **Stocks / ETFs / FX / indices →** [yfinance](https://github.com/ranaroussi/yfinance) (free, end-of-day + intraday).
-- **Crypto →** [ccxt](https://github.com/ccxt/ccxt) (default exchange Binance; change via `CCXT_EXCHANGE`).
+- **Crypto →** [ccxt](https://github.com/ccxt/ccxt) (default exchange **Toobit**; change via `CCXT_EXCHANGE` to any ccxt-supported id, e.g. `bybit`, `bitget`, `kucoin`).
 
 OHLCV is cached locally for `cache_minutes` to respect rate limits. The
 default timeframe is **daily** — the horizon where retail quant edges are
@@ -166,7 +196,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 23 unit/integration tests (synthetic data, no network)
+pytest -q            # 34 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 
@@ -176,9 +206,12 @@ python -m quantaura selftest
 quantaura/
   config.py        settings (YAML + .env)
   data.py          unified OHLCV providers (yfinance / ccxt) + cache
-  indicators.py    ATR, RSI, Bollinger, z-score, ADX, Donchian (look-ahead-free)
-  strategies.py    TrendBreakout, MeanReversion, ADX regime filter
+  indicators.py    ATR, RSI, Bollinger, z-score, ADX, Donchian, MACD,
+                   Keltner, Dual-Thrust range (all look-ahead-free)
+  strategies.py    TrendBreakout, MacdTrend, DualThrust, SqueezeBreakout,
+                   MeanReversion, ADX regime filter
   pairs.py         Engle-Granger cointegration pairs (stat-arb)
+  factor.py        cross-sectional momentum factor + panel backtest
   risk.py          fixed-fractional + fractional-Kelly sizing
   backtest.py      event-driven, look-ahead-free backtester + R-metrics
   engine.py        orchestration: data -> signal, with the backtest gate

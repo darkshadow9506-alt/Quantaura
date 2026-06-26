@@ -75,6 +75,45 @@ mean_reversion:
   atr_stop_mult: 3.0
   target: "mean"          # target = the moving-average (reversion to mean)
 
+# --- Strategy: MACD trend ---------------------------------------------
+# MACD signal-line crossover, filtered by the 200-MA. Classic momentum.
+macd:
+  enabled: true
+  fast: 12
+  slow: 26
+  signal: 9
+  ma_slow: 200
+  atr_period: 14
+  atr_stop_mult: 2.5
+  min_target_R: 2.0
+
+# --- Strategy: Dual Thrust (Michael Chalek) --------------------------
+# Range = max(HH-LC, HC-LL) over prior N bars; break Open±K*Range.
+dual_thrust:
+  enabled: true
+  range_bars: 4
+  k1: 0.5                 # upper-band sensitivity (long)
+  k2: 0.5                 # lower-band sensitivity (short)
+  trend_filter: true      # only take breakouts aligned with the 200-MA
+  ma_slow: 200
+  atr_period: 14
+  atr_stop_mult: 2.0
+  min_target_R: 2.0
+
+# --- Strategy: TTM Squeeze breakout (John Carter) --------------------
+# Bollinger inside Keltner = volatility squeeze; trade the release.
+squeeze:
+  enabled: true
+  bb_period: 20
+  bb_std: 2.0
+  kc_ema: 20
+  kc_atr: 10
+  kc_mult: 1.5
+  ma_slow: 200
+  atr_period: 14
+  atr_stop_mult: 1.5      # tight stop: volatility was compressed
+  min_target_R: 3.0       # wider target: expect a vol expansion move
+
 # --- Strategy: Statistical Arbitrage / Pairs -------------------------
 # Engle-Granger cointegration + z-score of the spread (Ornstein-Uhlenbeck
 # style reversion). Trades the relative value of two correlated assets.
@@ -91,6 +130,25 @@ pairs:
     - [GLD, SLV]
     - [XOM, CVX]
     - [V, MA]
+
+# --- Strategy: Cross-sectional Momentum (the academic 'momentum factor')
+# Jegadeesh-Titman (1993) / AQR: rank a universe by trailing 12-1 month
+# return, go long the strongest, short the weakest. Validated by a panel
+# (long-short basket) backtest, not a per-symbol one.
+factor_momentum:
+  enabled: true
+  lookback_days: 126      # ~6 months of trailing return
+  skip_days: 21           # skip the most recent month (avoids ST reversal)
+  rebalance_days: 21      # monthly rebalance in the backtest
+  top_n: 2                # go long the N strongest names per asset class
+  bottom_n: 2             # go short the N weakest (set 0 to disable shorts)
+  allow_short: true
+  atr_period: 14
+  atr_stop_mult: 3.0
+  min_target_R: 2.0
+  min_basket_rebalances: 24   # gate: need a real sample of rebalances
+  min_basket_winrate: 0.45
+  min_basket_profit_factor: 1.15
 
 # --- Risk management --------------------------------------------------
 risk:

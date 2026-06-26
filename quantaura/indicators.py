@@ -129,6 +129,42 @@ def adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 
 # ---------------------------------------------------------------------
+# MACD (Moving Average Convergence Divergence)
+# ---------------------------------------------------------------------
+def macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+    """Return (macd_line, signal_line, histogram)."""
+    ema_fast = ema(series, fast)
+    ema_slow = ema(series, slow)
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+    hist = macd_line - signal_line
+    return macd_line, signal_line, hist
+
+
+# ---------------------------------------------------------------------
+# Keltner channels (EMA + ATR bands) — used by the TTM squeeze
+# ---------------------------------------------------------------------
+def keltner(df: pd.DataFrame, ema_period: int = 20, atr_period: int = 10, mult: float = 1.5):
+    mid = ema(df["close"], ema_period)
+    a = atr(df, atr_period)
+    upper = mid + mult * a
+    lower = mid - mult * a
+    return mid, upper, lower
+
+
+# ---------------------------------------------------------------------
+# Dual Thrust range (Michael Chalek): max(HH-LC, HC-LL) over prior N bars
+# ---------------------------------------------------------------------
+def dual_thrust_range(df: pd.DataFrame, n: int = 4) -> pd.Series:
+    """Breakout range built from the PRIOR n bars (shifted, no look-ahead)."""
+    hh = df["high"].rolling(n, min_periods=n).max().shift(1)
+    ll = df["low"].rolling(n, min_periods=n).min().shift(1)
+    hc = df["close"].rolling(n, min_periods=n).max().shift(1)
+    lc = df["close"].rolling(n, min_periods=n).min().shift(1)
+    return pd.concat([(hh - lc), (hc - ll)], axis=1).max(axis=1)
+
+
+# ---------------------------------------------------------------------
 # Annualized realized volatility (for reporting)
 # ---------------------------------------------------------------------
 def realized_vol(close: pd.Series, period: int = 20, ann: int = 252) -> pd.Series:

@@ -62,6 +62,19 @@ def _cmd_pairs(args, settings: Settings) -> int:
     return 0
 
 
+def _cmd_factor(args, settings: Settings) -> int:
+    from . import engine
+
+    signals = engine.scan_factor(settings, publish_only=False)
+    if not signals:
+        print("No factor signals right now.")
+        return 0
+    for s in signals:
+        print(format_signal(s, md=False))
+        print("-" * 60)
+    return 0
+
+
 def _cmd_bot(args, settings: Settings) -> int:
     from .bot import run
 
@@ -88,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     p_sig.add_argument("symbol")
 
     sub.add_parser("pairs", help="scan cointegration pairs")
+    sub.add_parser("factor", help="scan the cross-sectional momentum factor")
     sub.add_parser("bot", help="run the Telegram bot")
     sub.add_parser("selftest", help="offline self-check (no network)")
 
@@ -98,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         "scan": _cmd_scan,
         "signal": _cmd_signal,
         "pairs": _cmd_pairs,
+        "factor": _cmd_factor,
         "bot": _cmd_bot,
         "selftest": _cmd_selftest,
     }

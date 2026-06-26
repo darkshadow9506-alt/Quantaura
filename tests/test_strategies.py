@@ -74,3 +74,48 @@ def test_regime_label(trending_df):
     r = detect_regime(trending_df, {"adx_period": 14, "adx_trend_threshold": 25,
                                     "adx_range_threshold": 20})
     assert r in ("trending", "ranging", "neutral")
+
+
+def test_macd_and_dualthrust_geometry(trending_df):
+    from quantaura.strategies import MacdTrend, DualThrust
+    for s in (MacdTrend({"ma_slow": 200, "atr_period": 14, "atr_stop_mult": 2.5,
+                         "min_target_R": 2.0}),
+              DualThrust({"range_bars": 4, "k1": 0.5, "k2": 0.5, "ma_slow": 200,
+                          "atr_period": 14, "atr_stop_mult": 2.0, "min_target_R": 2.0})):
+        prepared = s.prepare(trending_df)
+        plans = [s.evaluate(prepared, i) for i in range(len(prepared))]
+        plans = [p for p in plans if p is not None]
+        assert all(p.valid() for p in plans)
+
+
+def test_squeeze_fires_on_release():
+    from quantaura.strategies import SqueezeBreakout
+    rng = np.random.default_rng(0)
+    rise = np.linspace(80, 100, 205)
+    flat = 100 + rng.normal(0, 0.05, 18)
+    close = np.concatenate([rise, flat, np.array([104.0, 107.0])])
+    n = len(close)
+    hi = close + 0.4; lo = close - 0.4
+    hi[205:223] = close[205:223] + 0.4; lo[205:223] = close[205:223] - 0.4
+    op = np.concatenate([[close[0]], close[:-1]])
+    idx = pd.date_range("2021-01-01", periods=n, freq="B")
+    df = pd.DataFrame({"open": op, "high": np.maximum.reduce([op, hi, close]),
+                       "low": np.minimum.reduce([op, lo, close]), "close": close,
+                       "volume": np.full(n, 1e6)}, index=idx)
+    s = SqueezeBreakout({"bb_period": 20, "bb_std": 2.0, "kc_ema": 20, "kc_atr": 10,
+                         "kc_mult": 1.5, "ma_slow": 200, "atr_period": 14,
+                         "atr_stop_mult": 1.5, "min_target_R": 3.0})
+    p = s.prepare(df)
+    fired = next((s.evaluate(p, k) for k in range(220, n)
+                  if s.evaluate(p, k) is not None), None)
+    assert fired is not None and fired.side is Side.LONG and fired.valid()
+    assert abs(fired.rr_ratio - 3.0) < 1e-6   # squeeze uses a 3R target
+
+
+def test_build_strategies_count():
+    from quantaura.config import Settings
+    from quantaura.strategies import build_strategies
+    strats = build_strategies(Settings.load())
+    names = {s.name for s in strats}
+    assert {"trend_breakout", "mean_reversion", "macd_trend",
+            "dual_thrust", "squeeze_breakout"} <= names

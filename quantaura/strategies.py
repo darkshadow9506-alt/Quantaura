@@ -223,11 +223,211 @@ class MeanReversion:
 
 
 # ---------------------------------------------------------------------
+class MacdTrend:
+    """MACD signal-line crossover, filtered by the long-term trend.
+
+    A genuine, widely-used momentum trigger: go long when the MACD line
+    crosses ABOVE its signal line while price is above the 200-MA (mirror
+    for shorts). Entry at the crossover close; ATR stop; 2R target.
+    """
+
+    name = "macd_trend"
+    preferred_regime = "trending"
+
+    def __init__(self, cfg: dict):
+        self.fast = int(cfg.get("fast", 12))
+        self.slow = int(cfg.get("slow", 26))
+        self.signal = int(cfg.get("signal", 9))
+        self.ma_slow = int(cfg.get("ma_slow", 200))
+        self.atr_period = int(cfg.get("atr_period", 14))
+        self.atr_stop_mult = float(cfg.get("atr_stop_mult", 2.5))
+        self.min_target_R = float(cfg.get("min_target_R", 2.0))
+
+    def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
+        d = df.copy()
+        d["atr"] = ind.atr(d, self.atr_period)
+        d["ma_slow"] = ind.sma(d["close"], self.ma_slow)
+        d["macd"], d["macd_sig"], d["macd_hist"] = ind.macd(
+            d["close"], self.fast, self.slow, self.signal
+        )
+        return d
+
+    def evaluate(self, df: pd.DataFrame, i: int) -> Optional[TradePlan]:
+        if i < 1:
+            return None
+        row, prev = df.iloc[i], df.iloc[i - 1]
+        close = float(row["close"])
+        atr_v = float(row["atr"])
+        ma_slow = float(row["ma_slow"])
+        hist, hist_prev = float(row["macd_hist"]), float(prev["macd_hist"])
+        if not _finite(close, atr_v, ma_slow, hist, hist_prev) or atr_v <= 0:
+            return None
+        risk = self.atr_stop_mult * atr_v
+
+        # bullish crossover (hist turns positive) in an uptrend
+        if hist > 0 and hist_prev <= 0 and close > ma_slow:
+            entry = close
+            return TradePlan(
+                Side.LONG, entry, entry - risk, entry + self.min_target_R * risk, atr_v,
+                rationale=(f"MACD bullish cross (hist {hist_prev:.4f}→{hist:.4f}) "
+                           f"with price above {self.ma_slow}MA."),
+            )
+        # bearish crossover in a downtrend
+        if hist < 0 and hist_prev >= 0 and close < ma_slow:
+            entry = close
+            return TradePlan(
+                Side.SHORT, entry, entry + risk, entry - self.min_target_R * risk, atr_v,
+                rationale=(f"MACD bearish cross (hist {hist_prev:.4f}→{hist:.4f}) "
+                           f"with price below {self.ma_slow}MA."),
+            )
+        return None
+
+
+# ---------------------------------------------------------------------
+class DualThrust:
+    """Dual Thrust breakout (Michael Chalek).
+
+    Range = max(HH-LC, HC-LL) over the prior N bars. BuyLine = Open +
+    K1*Range, SellLine = Open - K2*Range. Break above BuyLine -> long;
+    break below SellLine -> short. A 200-MA filter is applied to only
+    take breakouts aligned with the major trend (reduces whipsaw).
+    """
+
+    name = "dual_thrust"
+    preferred_regime = "trending"
+
+    def __init__(self, cfg: dict):
+        self.n = int(cfg.get("range_bars", 4))
+        self.k1 = float(cfg.get("k1", 0.5))
+        self.k2 = float(cfg.get("k2", 0.5))
+        self.ma_slow = int(cfg.get("ma_slow", 200))
+        self.use_trend_filter = bool(cfg.get("trend_filter", True))
+        self.atr_period = int(cfg.get("atr_period", 14))
+        self.atr_stop_mult = float(cfg.get("atr_stop_mult", 2.0))
+        self.min_target_R = float(cfg.get("min_target_R", 2.0))
+
+    def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
+        d = df.copy()
+        d["atr"] = ind.atr(d, self.atr_period)
+        d["ma_slow"] = ind.sma(d["close"], self.ma_slow)
+        rng = ind.dual_thrust_range(d, self.n)
+        d["buyline"] = d["open"] + self.k1 * rng
+        d["sellline"] = d["open"] - self.k2 * rng
+        return d
+
+    def evaluate(self, df: pd.DataFrame, i: int) -> Optional[TradePlan]:
+        row = df.iloc[i]
+        close, high, low = float(row["close"]), float(row["high"]), float(row["low"])
+        atr_v = float(row["atr"])
+        ma_slow = float(row["ma_slow"])
+        buyline, sellline = float(row["buyline"]), float(row["sellline"])
+        if not _finite(close, high, low, atr_v, ma_slow, buyline, sellline) or atr_v <= 0:
+            return None
+        trend_ok_long = (close > ma_slow) if self.use_trend_filter else True
+        trend_ok_short = (close < ma_slow) if self.use_trend_filter else True
+        risk = self.atr_stop_mult * atr_v
+
+        if high > buyline and trend_ok_long:
+            entry = close
+            return TradePlan(
+                Side.LONG, entry, entry - risk, entry + self.min_target_R * risk, atr_v,
+                rationale=(f"Dual Thrust break above BuyLine {buyline:.4f} "
+                           f"(K1={self.k1}, {self.n}-bar range)."),
+                meta={"buyline": buyline},
+            )
+        if low < sellline and trend_ok_short:
+            entry = close
+            return TradePlan(
+                Side.SHORT, entry, entry + risk, entry - self.min_target_R * risk, atr_v,
+                rationale=(f"Dual Thrust break below SellLine {sellline:.4f} "
+                           f"(K2={self.k2}, {self.n}-bar range)."),
+                meta={"sellline": sellline},
+            )
+        return None
+
+
+# ---------------------------------------------------------------------
+class SqueezeBreakout:
+    """TTM Squeeze breakout (John Carter).
+
+    When Bollinger Bands contract INSIDE the Keltner channels, volatility
+    is compressed (a 'squeeze'). When the squeeze releases, price tends to
+    expand sharply. We enter in the direction of momentum on the release,
+    with a tight ATR stop (vol was low) and a larger 3R target (vol
+    expansion). A 200-MA filter keeps entries trend-aligned.
+    """
+
+    name = "squeeze_breakout"
+    preferred_regime = "trending"
+
+    def __init__(self, cfg: dict):
+        self.bb_period = int(cfg.get("bb_period", 20))
+        self.bb_std = float(cfg.get("bb_std", 2.0))
+        self.kc_ema = int(cfg.get("kc_ema", 20))
+        self.kc_atr = int(cfg.get("kc_atr", 10))
+        self.kc_mult = float(cfg.get("kc_mult", 1.5))
+        self.ma_slow = int(cfg.get("ma_slow", 200))
+        self.atr_period = int(cfg.get("atr_period", 14))
+        self.atr_stop_mult = float(cfg.get("atr_stop_mult", 1.5))
+        self.min_target_R = float(cfg.get("min_target_R", 3.0))
+
+    def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
+        d = df.copy()
+        d["atr"] = ind.atr(d, self.atr_period)
+        d["ma_slow"] = ind.sma(d["close"], self.ma_slow)
+        mid, up, low = ind.bollinger(d["close"], self.bb_period, self.bb_std)
+        kc_mid, kc_up, kc_low = ind.keltner(d, self.kc_ema, self.kc_atr, self.kc_mult)
+        d["bb_up"], d["bb_low"], d["bb_mid"] = up, low, mid
+        d["kc_up"], d["kc_low"] = kc_up, kc_low
+        # squeeze ON when BB sits entirely inside KC (low volatility)
+        d["squeeze_on"] = (up < kc_up) & (low > kc_low)
+        return d
+
+    def evaluate(self, df: pd.DataFrame, i: int) -> Optional[TradePlan]:
+        if i < 1:
+            return None
+        row, prev = df.iloc[i], df.iloc[i - 1]
+        close = float(row["close"])
+        atr_v = float(row["atr"])
+        ma_slow = float(row["ma_slow"])
+        bb_mid = float(row["bb_mid"])
+        sq_now, sq_prev = bool(row["squeeze_on"]), bool(prev["squeeze_on"])
+        if not _finite(close, atr_v, ma_slow, bb_mid) or atr_v <= 0:
+            return None
+
+        # fire only on the bar the squeeze RELEASES (on -> off)
+        if sq_prev and not sq_now:
+            risk = self.atr_stop_mult * atr_v
+            if close > bb_mid and close > ma_slow:    # upward release in uptrend
+                entry = close
+                return TradePlan(
+                    Side.LONG, entry, entry - risk, entry + self.min_target_R * risk, atr_v,
+                    rationale="TTM squeeze released upward (vol expansion) above the mean and 200MA.",
+                )
+            if close < bb_mid and close < ma_slow:    # downward release in downtrend
+                entry = close
+                return TradePlan(
+                    Side.SHORT, entry, entry + risk, entry - self.min_target_R * risk, atr_v,
+                    rationale="TTM squeeze released downward (vol expansion) below the mean and 200MA.",
+                )
+        return None
+
+
+# ---------------------------------------------------------------------
+_STRATEGY_REGISTRY = {
+    "trend": ("trend", TrendBreakout),
+    "mean_reversion": ("mean_reversion", MeanReversion),
+    "macd": ("macd", MacdTrend),
+    "dual_thrust": ("dual_thrust", DualThrust),
+    "squeeze": ("squeeze", SqueezeBreakout),
+}
+
+
 def build_strategies(settings) -> list:
-    """Instantiate enabled single-asset strategies from settings."""
+    """Instantiate every enabled single-asset strategy from settings."""
     out = []
-    if settings.trend.get("enabled", True):
-        out.append(TrendBreakout(settings.trend))
-    if settings.mean_reversion.get("enabled", True):
-        out.append(MeanReversion(settings.mean_reversion))
+    for _, (section, cls) in _STRATEGY_REGISTRY.items():
+        cfg = settings.section(section)
+        if cfg.get("enabled", True):
+            out.append(cls(cfg))
     return out

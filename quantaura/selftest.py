@@ -191,6 +191,78 @@ def run_selftest() -> bool:
     ok &= _check("formatting has entry/stop/target",
                  all(k in txt for k in ("Entry", "Stop", "Target")))
 
+    # 8) new momentum/breakout strategies --------------------------------
+    print("\n[8] MACD / Dual Thrust / Squeeze")
+    from .strategies import MacdTrend, DualThrust, SqueezeBreakout
+    tdf = _trending_series()
+    for cls, cfg in [
+        (MacdTrend, {"fast": 12, "slow": 26, "signal": 9, "ma_slow": 200,
+                     "atr_period": 14, "atr_stop_mult": 2.5, "min_target_R": 2.0}),
+        (DualThrust, {"range_bars": 4, "k1": 0.5, "k2": 0.5, "trend_filter": True,
+                      "ma_slow": 200, "atr_period": 14, "atr_stop_mult": 2.0,
+                      "min_target_R": 2.0}),
+        (SqueezeBreakout, {"bb_period": 20, "bb_std": 2.0, "kc_ema": 20, "kc_atr": 10,
+                           "kc_mult": 1.5, "ma_slow": 200, "atr_period": 14,
+                           "atr_stop_mult": 1.5, "min_target_R": 3.0}),
+    ]:
+        strat = cls(cfg)
+        st, trs = backtest_strategy(strat, tdf)
+        good_geom = all(np.isfinite(t.R) for t in trs)
+        prepared_s = strat.prepare(tdf)
+        plans = [strat.evaluate(prepared_s, k) for k in range(len(prepared_s))]
+        plans = [p for p in plans if p is not None]
+        good_plans = all(p.valid() for p in plans)
+        ok &= _check(f"{strat.name}: backtest+plan geometry valid",
+                     good_geom and good_plans, f"{st.trades} trades, {len(plans)} plans")
+
+    # deterministic squeeze: tight consolidation in an uptrend, then a
+    # breakout that expands BB beyond KC -> must fire a LONG on release.
+    rng = np.random.default_rng(0)
+    rise = np.linspace(80, 100, 205)
+    flat = 100 + rng.normal(0, 0.05, 18)
+    sq_close = np.concatenate([rise, flat, np.array([104.0, 107.0])])
+    m = len(sq_close)
+    hi = sq_close + 0.4; lo = sq_close - 0.4
+    hi[205:223] = sq_close[205:223] + 0.4; lo[205:223] = sq_close[205:223] - 0.4
+    op = np.concatenate([[sq_close[0]], sq_close[:-1]])
+    sq_idx = pd.date_range("2021-01-01", periods=m, freq="B")
+    sq_df = pd.DataFrame(
+        {"open": op, "high": np.maximum.reduce([op, hi, sq_close]),
+         "low": np.minimum.reduce([op, lo, sq_close]), "close": sq_close,
+         "volume": np.full(m, 1e6)}, index=sq_idx)
+    sq = SqueezeBreakout({"bb_period": 20, "bb_std": 2.0, "kc_ema": 20, "kc_atr": 10,
+                          "kc_mult": 1.5, "ma_slow": 200, "atr_period": 14,
+                          "atr_stop_mult": 1.5, "min_target_R": 3.0})
+    sq_prep = sq.prepare(sq_df)
+    fired = next((sq.evaluate(sq_prep, k) for k in range(220, m)
+                  if sq.evaluate(sq_prep, k) is not None), None)
+    ok &= _check("squeeze fires LONG on engineered release",
+                 fired is not None and fired.side is Side.LONG and fired.valid())
+
+    # 9) cross-sectional momentum factor ---------------------------------
+    print("\n[9] Cross-sectional momentum factor")
+    from . import factor as factor_mod
+    fcfg = {"lookback_days": 126, "skip_days": 21, "rebalance_days": 21,
+            "top_n": 2, "bottom_n": 2, "allow_short": True, "atr_period": 14,
+            "atr_stop_mult": 3.0, "min_target_R": 2.0}
+    frames = {}
+    for j in range(6):  # 6 synthetic assets with different drifts
+        rng = np.random.default_rng(20 + j)
+        drift = 0.0003 * (j - 2)
+        steps = rng.normal(drift, 0.012, 400)
+        close = 100 * np.exp(np.cumsum(steps))
+        idx = pd.date_range("2021-01-01", periods=400, freq="B")
+        frames[f"SYM{j}"] = _ohlc_from_close(close, idx, seed=20 + j)
+    panel = pd.DataFrame({k: v["close"] for k, v in frames.items()})
+    fstats = factor_mod.backtest_cross_sectional(panel, fcfg)
+    ok &= _check("factor panel backtest produced rebalances", fstats.trades > 0,
+                 f"{fstats.trades} rebalances")
+    legs = factor_mod.rank_live(frames, fcfg)
+    ok &= _check("factor produced long+short legs", len(legs) == 4, f"{len(legs)} legs")
+    ok &= _check("all factor legs valid geometry", all(l.valid() for l in legs))
+    sides = {l.side for l in legs}
+    ok &= _check("factor has both long and short", len(sides) == 2)
+
     print("\n" + "=" * 50)
     print("RESULT:", "ALL CHECKS PASSED ✅" if ok else "SOME CHECKS FAILED ❌")
     return ok
