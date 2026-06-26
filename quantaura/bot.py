@@ -69,6 +69,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• `/signal SYMBOL` — analyse one symbol now\n"
         "• `/pairs` — scan cointegration pairs\n"
         "• `/factor` — scan the cross-sectional momentum factor\n"
+        "• `/ml [SYMBOL]` — gradient-boosting model signal(s)\n"
         "• `/status` — show configuration\n\n"
         "Examples: `/signal AAPL` · `/signal EURUSD=X` · `/signal BTC/USDT`"
     )
@@ -87,7 +88,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Universe: {len(uni.get('stocks', []))} stocks, "
         f"{len(uni.get('forex', []))} FX, {len(uni.get('crypto', []))} crypto\n"
         f"Strategies: trend, macd, dual_thrust, squeeze, mean_reversion, "
-        f"pairs, factor_momentum\n"
+        f"pairs, factor_momentum, ml_gboost\n"
+        f"Trailing stop: {settings.risk.get('use_trailing_stop')} "
+        f"({settings.risk.get('trail_atr_mult')}×ATR)\n"
         f"Gate: ≥{g.get('min_backtest_trades')} trades, "
         f"win≥{float(g.get('min_win_rate',0))*100:.0f}%, "
         f"PF≥{g.get('min_profit_factor')}, Sharpe≥{g.get('min_sharpe')}\n"
@@ -186,6 +189,24 @@ async def cmd_factor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await _send_signals(update.message, context, signals)
 
 
+async def cmd_ml(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if not await _guard(settings, update):
+        return
+    if context.args:
+        symbol = context.args[0].strip().upper()
+        ac = asset_class_of(symbol, settings.universe)
+        await update.message.reply_text(f"🤖 Training the ML model on {symbol}…")
+        signals = await asyncio.to_thread(engine.scan_ml_symbol, symbol, ac, settings, False)
+    else:
+        await update.message.reply_text("🤖 Running the ML model across the universe… (slow)")
+        signals = await asyncio.to_thread(engine.scan_ml, settings, True)
+    await update.message.reply_text(
+        format_scan_summary(signals), parse_mode=ParseMode.MARKDOWN
+    )
+    await _send_signals(update.message, context, signals)
+
+
 async def _scheduled_scan(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
     chat_id = settings.telegram_broadcast_chat_id
@@ -222,6 +243,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("signal", cmd_signal))
     app.add_handler(CommandHandler("pairs", cmd_pairs))
     app.add_handler(CommandHandler("factor", cmd_factor))
+    app.add_handler(CommandHandler("ml", cmd_ml))
 
     # optional scheduled broadcast (needs the job-queue extra + a chat id)
     if settings.telegram_broadcast_chat_id and app.job_queue is not None:

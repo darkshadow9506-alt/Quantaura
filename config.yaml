@@ -150,12 +150,34 @@ factor_momentum:
   min_basket_winrate: 0.45
   min_basket_profit_factor: 1.15
 
+# --- Strategy: Machine Learning (gradient boosting) ------------------
+# Supervised learning on engineered features, predicting the triple-
+# barrier label (will price hit +k·ATR before -k·ATR within horizon).
+# Trained with PURGED walk-forward (no leakage). Heavier to compute, so
+# it has its own /ml command and is not part of the default /scan.
+ml:
+  enabled: true
+  horizon: 10            # forward bars for the barrier label
+  k: 1.5                 # barrier width in ATR units (= TP/SL distance)
+  min_train: 250         # minimum bars before the model will trade
+  refit_every: 42        # refit cadence (bars) in the walk-forward backtest
+  prob_threshold: 0.58   # only act when P(up) >= this (or P(down) >= this)
+  max_iter: 200          # gradient-boosting trees
+  max_depth: 3
+  learning_rate: 0.05
+
 # --- Risk management --------------------------------------------------
 risk:
   risk_per_trade_pct: 1.0     # risk 1% of equity per trade (fixed-fractional)
   kelly_fraction: 0.5         # use HALF-Kelly on the backtested edge (safer)
   max_kelly_pct: 5.0          # never size above 5% of equity on one idea
   max_open_per_class: 5       # concurrency cap suggestion per asset class
+  # --- Trailing stop (Chandelier exit) ---
+  # When enabled, the backtester trails the stop at (extreme - mult·ATR)
+  # so winners can run past the fixed target. Each signal also carries a
+  # management note describing the trail for live use.
+  use_trailing_stop: true
+  trail_atr_mult: 3.0         # chandelier distance in ATR units
 
 # --- Signal gating ----------------------------------------------------
 # A raw strategy trigger is only PUBLISHED as a signal if its own

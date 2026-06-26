@@ -75,6 +75,33 @@ def _cmd_factor(args, settings: Settings) -> int:
     return 0
 
 
+def _cmd_ml(args, settings: Settings) -> int:
+    from . import engine
+    from .data import asset_class_of as _ac
+
+    if getattr(args, "symbol", None):
+        sym = args.symbol.strip().upper()
+        signals = engine.scan_ml_symbol(sym, _ac(sym, settings.universe), settings,
+                                        publish_only=False)
+    else:
+        signals = engine.scan_ml(settings, publish_only=False)
+    if not signals:
+        print("No ML signals right now.")
+        return 0
+    for s in signals:
+        print(format_signal(s, md=False))
+        print("-" * 60)
+    return 0
+
+
+def _cmd_optimize(args, settings: Settings) -> int:
+    from .optimize import optimize_symbol, format_report
+
+    print(format_report(optimize_symbol(args.symbol.strip().upper(),
+                                        args.strategy, settings)))
+    return 0
+
+
 def _cmd_bot(args, settings: Settings) -> int:
     from .bot import run
 
@@ -102,6 +129,15 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("pairs", help="scan cointegration pairs")
     sub.add_parser("factor", help="scan the cross-sectional momentum factor")
+
+    p_ml = sub.add_parser("ml", help="gradient-boosting model signal(s)")
+    p_ml.add_argument("symbol", nargs="?", help="one symbol, or omit for the whole universe")
+
+    p_opt = sub.add_parser("optimize", help="walk-forward parameter search for a strategy")
+    p_opt.add_argument("symbol")
+    p_opt.add_argument("--strategy", default="trend",
+                       choices=["trend", "mean_reversion", "macd", "dual_thrust", "squeeze"])
+
     sub.add_parser("bot", help="run the Telegram bot")
     sub.add_parser("selftest", help="offline self-check (no network)")
 
@@ -113,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         "signal": _cmd_signal,
         "pairs": _cmd_pairs,
         "factor": _cmd_factor,
+        "ml": _cmd_ml,
+        "optimize": _cmd_optimize,
         "bot": _cmd_bot,
         "selftest": _cmd_selftest,
     }

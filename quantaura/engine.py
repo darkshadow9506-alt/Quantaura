@@ -25,6 +25,7 @@ import pandas as pd
 
 from . import data as data_mod
 from . import factor as factor_mod
+from . import ml as ml_mod
 from . import montecarlo as mc_mod
 from . import pairs as pairs_mod
 from . import risk as risk_mod
@@ -132,6 +133,7 @@ def _build_signal(
     settings: Settings,
     passed_gate: bool,
     drift: float = 0.0,
+    management: str = "",
 ) -> Signal:
     gate = settings.signal_gate
     oos, mc = _assess(plan.side, plan.entry, plan.stop, plan.target, plan.atr,
@@ -154,6 +156,7 @@ def _build_signal(
         atr=round(plan.atr, 6),
         regime=regime,
         rationale=plan.rationale,
+        management=management,
         backtest=stats,
         oos=oos,
         montecarlo=mc,
@@ -198,7 +201,17 @@ def scan_symbol(
         plan = strat.evaluate(prepared, len(prepared) - 1)
         if plan is None or not plan.valid():
             continue
-        stats, _ = backtest_strategy(strat, df)
+        # trailing (Chandelier) exit is used for trend/breakout strategies
+        # when enabled, so the backtest reflects how the trade is managed.
+        risk_cfg = settings.risk
+        trail = 0.0
+        management = ""
+        if (risk_cfg.get("use_trailing_stop", False)
+                and strat.preferred_regime == "trending"):
+            trail = float(risk_cfg.get("trail_atr_mult", 3.0))
+            management = (f"Trail the stop at (extreme − {trail}×ATR) after entry; "
+                          f"the target is a minimum — let winners run on the trail.")
+        stats, _ = backtest_strategy(strat, df, trail_atr_mult=trail)
         oos, mc = _assess(plan.side, plan.entry, plan.stop, plan.target, plan.atr,
                           stats, drift, gate)
         passed = _passes_gate(stats, oos, mc, gate)
@@ -215,6 +228,7 @@ def scan_symbol(
                 settings=settings,
                 passed_gate=passed,
                 drift=drift,
+                management=management,
             )
         )
 
@@ -391,6 +405,60 @@ def scan_factor(settings: Settings, publish_only: bool = True) -> list[Signal]:
                 confidence=_confidence(stats, oos, mc), passed_gate=passed,
                 timeframe=d.get("timeframe", "1d"), price_at_signal=round(leg.entry, 6),
             ))
+    return out
+
+
+# ---------------------------------------------------------------------
+def scan_ml_symbol(
+    symbol: str, asset_class: AssetClass, settings: Settings, publish_only: bool = True
+) -> list[Signal]:
+    """Gradient-boosting (triple-barrier) signal for one symbol."""
+    mlcfg = settings.section("ml")
+    if not mlcfg.get("enabled", True):
+        return []
+    d = settings.data
+    try:
+        df = data_mod.get_ohlcv(
+            symbol, asset_class, timeframe=d.get("timeframe", "1d"),
+            lookback=int(d.get("lookback_bars", 1250)),
+            cache_minutes=int(d.get("cache_minutes", 30)),
+            ccxt_exchange=settings.ccxt_exchange,
+        )
+    except Exception:
+        return []
+    if df is None or len(df) < int(mlcfg.get("min_train", 250)) + 30:
+        return []
+
+    plan = ml_mod.latest_plan(df, mlcfg)
+    if plan is None or not plan.valid():
+        return []
+    stats, _ = ml_mod.backtest_ml(df, mlcfg)
+    drift = _recent_drift(df, int(settings.regime.get("adx_period", 14)))
+    oos, mc = _assess(plan.side, plan.entry, plan.stop, plan.target, plan.atr,
+                      stats, drift, settings.signal_gate)
+    passed = _passes_gate(stats, oos, mc, settings.signal_gate)
+    if publish_only and not passed:
+        return []
+    return [_build_signal(
+        symbol=symbol, asset_class=asset_class, strategy_name="ml_gboost",
+        plan=plan, stats=stats, regime="ml", settings=settings,
+        passed_gate=passed, drift=drift,
+    )]
+
+
+def scan_ml(settings: Settings, publish_only: bool = True) -> list[Signal]:
+    """Run the ML model across the whole universe (heavier than /scan)."""
+    uni = settings.universe
+    class_map = {"stocks": AssetClass.STOCK, "forex": AssetClass.FOREX,
+                 "crypto": AssetClass.CRYPTO}
+    out: list[Signal] = []
+    for cls, ac in class_map.items():
+        for sym in uni.get(cls, []):
+            try:
+                out.extend(scan_ml_symbol(sym, ac, settings, publish_only))
+            except Exception:
+                continue
+    out.sort(key=lambda s: s.confidence, reverse=True)
     return out
 
 

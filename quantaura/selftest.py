@@ -281,6 +281,40 @@ def run_selftest() -> bool:
                  hasattr(sig, "montecarlo") and hasattr(sig, "oos")
                  and 0.0 <= sig.montecarlo.win_prob <= 1.0)
 
+    # 11) ML, trailing stop, optimizer -----------------------------------
+    print("\n[11] ML + trailing + optimizer")
+    from . import ml as ml_mod
+    from . import optimize as opt_mod
+    ml_df = _trending_series(n=500)
+    ml_cfg = {"horizon": 10, "k": 1.5, "min_train": 250, "refit_every": 60,
+              "prob_threshold": 0.55, "max_iter": 120, "max_depth": 3,
+              "learning_rate": 0.05}
+    ml_stats, last_prob = ml_mod.backtest_ml(ml_df, ml_cfg)
+    ok &= _check("ML walk-forward backtest ran", ml_stats.trades > 0,
+                 f"{ml_stats.trades} trades")
+    ok &= _check("ML last prob in [0,1]", last_prob is None or 0.0 <= last_prob <= 1.0)
+    lab = ml_mod.triple_barrier_labels(ml_df, 10, 1.5)
+    ok &= _check("triple-barrier labels binary",
+                 set(lab.dropna().unique()) <= {0.0, 1.0})
+    ml_plan = ml_mod.latest_plan(ml_df, ml_cfg)
+    ok &= _check("ML plan valid (or no trade)",
+                 ml_plan is None or ml_plan.valid())
+
+    from .strategies import TrendBreakout as _TB
+    _s = _TB({"donchian_entry": 20, "ma_slow": 200, "atr_period": 14,
+              "atr_stop_mult": 2.5, "min_target_R": 2.0})
+    _, fixed_tr = backtest_strategy(_s, ml_df)
+    _, trail_tr = backtest_strategy(_s, ml_df, trail_atr_mult=3.0)
+    ok &= _check("trailing exits are trail/time only",
+                 all(t.outcome in ("trail", "time") for t in trail_tr))
+
+    opt_res = opt_mod.optimize_on_df(
+        ml_df, "trend", {"ma_slow": 200, "atr_period": 14, "donchian_exit": 10,
+                         "ma_fast": 50}, min_trades=5, oos_min_trades=2)
+    ok &= _check("optimizer searched grid", len(opt_res) == 27)
+    ok &= _check("optimizer ranked by score",
+                 [r.score for r in opt_res] == sorted([r.score for r in opt_res], reverse=True))
+
     print("\n" + "=" * 50)
     print("RESULT:", "ALL CHECKS PASSED ✅" if ok else "SOME CHECKS FAILED ❌")
     return ok

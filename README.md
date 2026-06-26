@@ -34,6 +34,7 @@ edges are:
 | **Mean reversion** | Short-horizon reversal | Temporary supply/demand imbalances revert to fair value | days |
 | **Pairs / stat-arb** | Statistical arbitrage | Cointegrated assets converge after diverging | days–weeks |
 | **Cross-sectional momentum** | Factor investing | Winners keep winning vs. losers (Jegadeesh–Titman / AQR) | weeks–months |
+| **ML (gradient boosting)** | Supervised learning | Patterns across many features → P(win), triple-barrier labels | days–weeks |
 
 Everything QuantAura does maps onto the standard quant pipeline:
 **data → signal research → backtest → execution → risk management.** We
@@ -82,6 +83,18 @@ avoid short-term reversal); go **long the strongest, short the weakest**.
 This is the Jegadeesh–Titman (1993) momentum factor used at scale by AQR
 and others. It is validated by a **panel (long-short basket) backtest**,
 not a per-symbol one.
+
+**8. Machine learning (gradient boosting).** A `HistGradientBoosting`
+classifier trained on ~18 engineered, look-ahead-free features (multi-
+horizon returns, RSI, MACD, ADX, Bollinger %b, distance-from-MA, realised
+vol, momentum, volume z-score) to predict the **triple-barrier label** of
+López de Prado: *will price hit +k·ATR before −k·ATR within the horizon?*
+The trade taken (TP = +k·ATR, SL = −k·ATR) matches the label, so the model
+literally estimates P(win). The backtest uses **purged walk-forward**
+training (the model predicting bar *t* is fit only on bars whose label
+window closed at or before *t*), so there is no leakage. Because it is
+heavier to compute, ML has its own `/ml` command and is not part of the
+default `/scan`.
 
 A **regime filter (ADX)** decides which engine is even allowed to fire on a
 symbol: trending markets → the momentum/breakout engines (trend, MACD, dual
@@ -141,6 +154,20 @@ estimates that make weak setups visibly weak.
   **half-Kelly**, capped at `max_kelly_pct`. The final size is the more
   conservative of the two. Full Kelly is intentionally avoided — it is far
   too aggressive on noisy, non-stationary estimates.
+- **Trailing (Chandelier) stop:** for trend/breakout strategies, an opt-in
+  ATR trailing stop (`risk.use_trailing_stop`, `trail_atr_mult`) lets
+  winners run past the fixed target. The backtest is run *with* the trail
+  when enabled, so the published stats reflect how the trade is actually
+  managed, and each signal carries a management note describing the trail.
+
+### Tuning without curve-fitting — the optimizer
+
+`python -m quantaura optimize SYMBOL --strategy trend` grid-searches a
+strategy's key parameters and **scores every combination by its
+out-of-sample expectancy**, never its in-sample fit. This is the
+walk-forward discipline that separates a real parameter choice from an
+over-fit one. It's a research tool — it reports the best held-out
+parameters; it does not silently change your live config.
 
 ---
 
@@ -189,6 +216,9 @@ python -m quantaura signal EURUSD=X
 python -m quantaura signal BTC/USDT
 python -m quantaura pairs
 python -m quantaura factor
+python -m quantaura ml AAPL                 # ML model for one symbol
+python -m quantaura ml                      # ML across the universe (slower)
+python -m quantaura optimize AAPL --strategy trend
 
 # 3) Start the Telegram bot
 python -m quantaura bot
@@ -203,6 +233,7 @@ python -m quantaura bot
 | `/signal SYMBOL` | analyse one symbol now (e.g. `/signal AAPL`) |
 | `/pairs` | scan the cointegration pairs |
 | `/factor` | scan the cross-sectional momentum factor |
+| `/ml [SYMBOL]` | gradient-boosting model signal(s) |
 | `/status` | show the active configuration |
 
 A signal card shows side, entry/stop/target, R:R, ATR, suggested size and
@@ -226,7 +257,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 43 unit/integration tests (synthetic data, no network)
+pytest -q            # 51 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 
@@ -242,7 +273,9 @@ quantaura/
                    MeanReversion, ADX regime filter
   pairs.py         Engle-Granger cointegration pairs (stat-arb)
   factor.py        cross-sectional momentum factor + panel backtest
+  ml.py            gradient boosting + triple-barrier (purged walk-forward)
   montecarlo.py    bootstrap robustness + P(TP before SL) win-probability
+  optimize.py      walk-forward parameter search (scored out-of-sample)
   risk.py          fixed-fractional + fractional-Kelly sizing
   backtest.py      event-driven, look-ahead-free backtester + R-metrics
   engine.py        orchestration: data -> signal, with the backtest gate

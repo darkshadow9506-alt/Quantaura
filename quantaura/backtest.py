@@ -89,8 +89,50 @@ class Trade:
     outcome: str
 
 
-def _simulate_trade(df: pd.DataFrame, i: int, plan: TradePlan, max_hold: int):
+def _simulate_trailing(df, i, plan, max_hold, trail_mult):
+    """Chandelier-exit simulation: trail the stop at (extreme - mult·ATR).
+
+    The fixed target is dropped so winners can run; exit is the trailed
+    stop or max_hold. The trail uses only bars strictly before the current
+    one (no look-ahead). Returns (R, exit_idx, exit_price, outcome).
+    """
+    entry, risk = plan.entry, plan.risk_per_unit
+    atr = plan.atr
+    n = len(df)
+    end = min(i + max_hold, n - 1)
+    long = plan.side is Side.LONG
+    ext = float(df["high"].iloc[i]) if long else float(df["low"].iloc[i])
+    if long:
+        stop = max(plan.stop, ext - trail_mult * atr)
+    else:
+        stop = min(plan.stop, ext + trail_mult * atr)
+
+    for j in range(i + 1, end + 1):
+        high = float(df["high"].iloc[j])
+        low = float(df["low"].iloc[j])
+        if long and low <= stop:
+            return (stop - entry) / risk, j, stop, "trail"
+        if (not long) and high >= stop:
+            return (entry - stop) / risk, j, stop, "trail"
+        # ratchet the trail using this bar's extreme (for the NEXT bar)
+        if long:
+            ext = max(ext, high)
+            stop = max(stop, ext - trail_mult * atr)
+        else:
+            ext = min(ext, low)
+            stop = min(stop, ext + trail_mult * atr)
+
+    exit_price = float(df["close"].iloc[end])
+    R = (exit_price - entry) / risk if long else (entry - exit_price) / risk
+    return R, end, exit_price, "time"
+
+
+def _simulate_trade(df: pd.DataFrame, i: int, plan: TradePlan, max_hold: int,
+                    trail_atr_mult: float = 0.0):
     """Walk forward from entry bar i; return (R, exit_idx, exit_price, outcome)."""
+    if trail_atr_mult > 0 and plan.atr > 0:
+        return _simulate_trailing(df, i, plan, max_hold, trail_atr_mult)
+
     entry = plan.entry
     stop = plan.stop
     target = plan.target
@@ -130,10 +172,12 @@ def _simulate_trade(df: pd.DataFrame, i: int, plan: TradePlan, max_hold: int):
     return R, end, exit_price, "time"
 
 
-def backtest_strategy(strategy, df: pd.DataFrame, max_hold: int = 60):
+def backtest_strategy(strategy, df: pd.DataFrame, max_hold: int = 60,
+                      trail_atr_mult: float = 0.0):
     """Backtest one strategy over a prepared OHLCV frame.
 
-    Returns (BacktestStats, list[Trade]).
+    `trail_atr_mult > 0` enables a Chandelier trailing-stop exit instead of
+    the fixed target. Returns (BacktestStats, list[Trade]).
     """
     prepared = strategy.prepare(df)
     n = len(prepared)
@@ -149,7 +193,8 @@ def backtest_strategy(strategy, df: pd.DataFrame, max_hold: int = 60):
         except Exception:
             plan = None
         if plan is not None and plan.valid():
-            R, exit_idx, exit_price, outcome = _simulate_trade(prepared, i, plan, max_hold)
+            R, exit_idx, exit_price, outcome = _simulate_trade(
+                prepared, i, plan, max_hold, trail_atr_mult)
             trades.append(
                 Trade(i, exit_idx, plan.side.value, plan.entry, exit_price, R, outcome)
             )

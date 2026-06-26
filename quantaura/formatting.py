@@ -75,6 +75,8 @@ def format_signal(sig: Signal, md: bool = True) -> str:
         lines.append("❗ Below publish threshold — shown for inspection only.")
     lines.append("")
     lines.append(f"💡 {sig.rationale}")
+    if sig.management:
+        lines.append(f"🧭 {sig.management}")
     lines.append("")
     lines.append(_DISCLAIMER)
 

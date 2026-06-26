@@ -87,6 +87,7 @@ class Signal:
     atr: float = 0.0
     regime: str = ""
     rationale: str = ""
+    management: str = ""          # how to manage the trade (e.g. trailing stop)
     backtest: BacktestStats = field(default_factory=BacktestStats)
     oos: BacktestStats = field(default_factory=BacktestStats)   # out-of-sample
     montecarlo: MonteCarloStats = field(default_factory=MonteCarloStats)
