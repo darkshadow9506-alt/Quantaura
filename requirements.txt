@@ -1,0 +1,17 @@
+# ---- Core numerical / data stack ----
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11
+statsmodels>=0.14          # cointegration (Engle-Granger), OLS hedge ratios
+
+# ---- Market data ----
+yfinance>=0.2.40           # stocks, ETFs, FX, indices (free, EOD + intraday)
+ccxt>=4.3                  # crypto exchange OHLCV (Binance, etc.)
+
+# ---- Telegram bot ----
+python-telegram-bot[job-queue]>=21.0  # async bot framework (v21 API) + scheduler
+
+# ---- Config / utilities ----
+PyYAML>=6.0
+python-dotenv>=1.0
+tenacity>=8.2              # retry/backoff for network calls

@@ -1,0 +1,29 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Caches / data
+.cache/
+data_cache/
+*.parquet
+*.pkl
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log

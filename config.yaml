@@ -1,0 +1,110 @@
+# ============================================================
+#  QuantAura — strategy & universe configuration
+#  Every number here is a deliberate, documented choice grounded
+#  in published quant practice (see README "Methodology").
+#  Change these to tune the system; nothing is hard-coded in logic.
+# ============================================================
+
+# --- Tradable universe -------------------------------------------------
+# Each asset class is fetched from the correct data source automatically.
+# Symbols must be valid for their provider (yfinance / ccxt).
+universe:
+  stocks:        # US equities & ETFs (yfinance tickers)
+    - AAPL
+    - MSFT
+    - NVDA
+    - AMZN
+    - GOOGL
+    - META
+    - TSLA
+    - SPY
+    - QQQ
+  forex:         # FX majors (yfinance "=X" tickers)
+    - EURUSD=X
+    - GBPUSD=X
+    - USDJPY=X
+    - AUDUSD=X
+    - USDCAD=X
+  crypto:        # ccxt unified symbols (BASE/QUOTE)
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+    - XRP/USDT
+
+# --- Data ------------------------------------------------------------
+data:
+  timeframe: "1d"        # 1d = daily (the horizon where retail quant edges are real)
+  lookback_bars: 1250    # ~5y of daily bars: enough for 200-MA + a real backtest sample
+  cache_minutes: 30      # re-use cached OHLCV for this long to avoid rate limits
+
+# --- Regime filter ----------------------------------------------------
+# Decides whether a symbol is trending (use momentum) or ranging
+# (use mean reversion). Prevents the two engines from fighting.
+regime:
+  adx_period: 14
+  adx_trend_threshold: 25     # ADX >= 25 -> trending; < 20 -> ranging
+  adx_range_threshold: 20
+
+# --- Strategy: Trend / Time-Series Momentum --------------------------
+# Donchian-channel breakout with a long-term moving-average filter.
+# This is the classic trend-following edge run by CTAs (Man AHL, etc.).
+trend:
+  enabled: true
+  donchian_entry: 20      # breakout of 20-bar high/low triggers entry
+  donchian_exit: 10       # opposite 10-bar channel is the trailing exit
+  ma_fast: 50
+  ma_slow: 200            # only long above 200MA, only short below it
+  atr_period: 14
+  atr_stop_mult: 2.5      # initial stop = entry -/+ 2.5*ATR
+  min_target_R: 2.0       # take-profit at >= 2R (reward:risk)
+
+# --- Strategy: Mean Reversion ----------------------------------------
+# Short-horizon overreaction reversal. Bollinger/z-score + RSI-2,
+# only taken WITH the long-term trend (buy dips in uptrends).
+mean_reversion:
+  enabled: true
+  bb_period: 20
+  bb_std: 2.0
+  zscore_entry: 2.0       # |z| >= 2 = stretched away from the mean
+  rsi_period: 2           # Connors RSI-2: classic short-term MR filter
+  rsi_buy_below: 10
+  rsi_sell_above: 90
+  ma_trend: 200           # regime/trend filter for direction
+  atr_period: 14
+  atr_stop_mult: 3.0
+  target: "mean"          # target = the moving-average (reversion to mean)
+
+# --- Strategy: Statistical Arbitrage / Pairs -------------------------
+# Engle-Granger cointegration + z-score of the spread (Ornstein-Uhlenbeck
+# style reversion). Trades the relative value of two correlated assets.
+pairs:
+  enabled: true
+  lookback: 252           # ~1y of daily bars to estimate the relationship
+  coint_pvalue_max: 0.05  # only trade statistically cointegrated pairs
+  zscore_entry: 2.0
+  zscore_exit: 0.5
+  zscore_stop: 3.5        # structural-break stop
+  candidates:             # pre-screened economically-related pairs
+    - [KO, PEP]
+    - [MSFT, AAPL]
+    - [GLD, SLV]
+    - [XOM, CVX]
+    - [V, MA]
+
+# --- Risk management --------------------------------------------------
+risk:
+  risk_per_trade_pct: 1.0     # risk 1% of equity per trade (fixed-fractional)
+  kelly_fraction: 0.5         # use HALF-Kelly on the backtested edge (safer)
+  max_kelly_pct: 5.0          # never size above 5% of equity on one idea
+  max_open_per_class: 5       # concurrency cap suggestion per asset class
+
+# --- Signal gating ----------------------------------------------------
+# A raw strategy trigger is only PUBLISHED as a signal if its own
+# historical backtest on that symbol clears these bars. This is how we
+# refuse to emit "made-up" signals: every signal is backtest-validated.
+signal_gate:
+  min_backtest_trades: 15     # need a meaningful sample
+  min_win_rate: 0.40
+  min_profit_factor: 1.15
+  min_sharpe: 0.3       # significance score (mean/std·√N), not annualized Sharpe
