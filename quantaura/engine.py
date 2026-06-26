@@ -293,9 +293,16 @@ def scan_pairs(settings: Settings, publish_only: bool = True) -> list[PairSignal
         if plan is None:
             continue
         stats = pairs_mod.backtest_pair(da["close"], db["close"], pcfg)
-        drift_a = _recent_drift(da, 14)
-        oos, mc = _assess(plan.side_a, plan.entry_a, plan.stop_a, plan.target_a,
-                          atr_a, stats, drift_a, gate)
+        oos = out_of_sample(stats, float(gate.get("oos_split", 0.7)))
+        # pairs win-probability uses the spread mean-reversion (AR(1)) model,
+        # not single-leg drift — the edge here is convergence of the spread.
+        mc = mc_mod.assess_pairs(
+            returns_R=stats.returns_R, z_now=plan.spread_z,
+            z_exit=plan.z_exit, z_stop=plan.z_stop,
+            phi=plan.ar1_phi, sigma_eps=plan.ar1_sigma,
+            ruin_R=float(gate.get("ruin_R", 10.0)),
+            max_bars=int(gate.get("mc_max_bars", 60)),
+        )
         passed = _passes_gate(stats, oos, mc, gate)
         if publish_only and not passed:
             continue

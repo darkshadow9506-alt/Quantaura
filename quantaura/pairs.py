@@ -38,6 +38,11 @@ class PairPlan:
     coint_pvalue: float
     atr_a: float
     rationale: str
+    # spread mean-reversion model (AR(1)/Ornstein-Uhlenbeck on the z-score)
+    z_exit: float = 0.5      # |z| target to revert toward (win barrier)
+    z_stop: float = 3.5      # |z| structural-break level (loss barrier)
+    ar1_phi: float = 0.0     # AR(1) coefficient of the spread z-score
+    ar1_sigma: float = 0.0   # std of AR(1) residuals
 
     @property
     def risk_per_unit(self) -> float:
@@ -121,6 +126,19 @@ def evaluate_pair(
     if abs(z_now) < z_entry:
         return None
 
+    # AR(1) fit of the z-score: z_t = phi*z_{t-1} + eps  (discrete OU).
+    # phi in (0,1) measures mean-reversion speed; used for the win-prob model.
+    z_ser = ((spread - mu) / sigma).dropna().values
+    phi, sigma_eps = 0.0, 0.0
+    if len(z_ser) > 5:
+        z_lag, z_cur = z_ser[:-1], z_ser[1:]
+        denom = float(np.sum(z_lag * z_lag))
+        if denom > 0:
+            phi = float(np.sum(z_lag * z_cur) / denom)
+            phi = max(0.0, min(0.999, phi))
+            resid = z_cur - phi * z_lag
+            sigma_eps = float(np.std(resid))
+
     b_now = float(b.iloc[-1])
     a_now = float(a.iloc[-1])
 
@@ -150,6 +168,7 @@ def evaluate_pair(
         entry_a=entry_a, stop_a=stop_a, target_a=target_a,
         hedge_ratio=beta, spread_z=z_now, coint_pvalue=pvalue,
         atr_a=atr_a, rationale=rationale,
+        z_exit=z_exit, z_stop=z_stop, ar1_phi=phi, ar1_sigma=sigma_eps,
     )
     return plan if plan.valid() else None
 

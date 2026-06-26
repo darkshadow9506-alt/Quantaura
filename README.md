@@ -60,7 +60,11 @@ moving-average mean (reversion to fair value).
 OLS hedge ratio + z-score of the spread (Ornstein–Uhlenbeck-style
 reversion). Only trades pairs that are statistically cointegrated
 (p ≤ 0.05). Long the cheap leg, short the rich leg; exit toward the mean,
-stop on a structural break (z ≥ 3.5).
+stop on a structural break (z ≥ 3.5). The win-probability for a pairs
+trade is modelled with a **discrete Ornstein–Uhlenbeck / AR(1)** fit of
+the spread's z-score (P that it reverts to the exit band before hitting
+the stop band) — the correct model for stat-arb, since the edge is mean
+reversion of the spread, not directional drift in either leg.
 
 **4. MACD trend.** Go long when the MACD line crosses *above* its signal
 line while price is above the 200-MA (mirror for shorts). ATR stop, 2R
@@ -145,6 +149,15 @@ scenarios"):
 All of these feed a single blended **confidence** score (0–100%) shown on
 every signal. None of them is a guarantee — they are honest probability
 estimates that make weak setups visibly weak.
+
+### Portfolio-level risk
+
+A single trade can be sized correctly yet a *basket* of simultaneous
+signals can still over-concentrate risk. After a scan, QuantAura appends a
+**portfolio summary**: total risk-at-stop (% of equity), gross / net
+exposure, risk by asset class, and warnings when the book exceeds the risk
+budget, over-concentrates in one class, or becomes one-directional. This
+is the "position management / risk budget" discipline from the doc.
 
 ### Risk management
 
@@ -260,7 +273,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 51 unit/integration tests (synthetic data, no network)
+pytest -q            # 63 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 
@@ -277,8 +290,9 @@ quantaura/
   pairs.py         Engle-Granger cointegration pairs (stat-arb)
   factor.py        cross-sectional momentum factor + panel backtest
   ml.py            gradient boosting + triple-barrier (purged walk-forward)
-  montecarlo.py    bootstrap robustness + P(TP before SL) win-probability
+  montecarlo.py    bootstrap robustness + P(TP before SL) + spread-reversion
   optimize.py      walk-forward parameter search (scored out-of-sample)
+  portfolio.py     batch risk: total risk-at-stop, exposure, concentration
   risk.py          fixed-fractional + fractional-Kelly sizing
   backtest.py      event-driven, look-ahead-free backtester + R-metrics
   engine.py        orchestration: data -> signal, with the backtest gate

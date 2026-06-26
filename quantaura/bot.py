@@ -33,6 +33,7 @@ from telegram.ext import (
 )
 
 from . import engine
+from . import portfolio as portfolio_mod
 from .config import Settings
 from .data import asset_class_of
 from .formatting import format_scan_summary, format_signal
@@ -128,12 +129,22 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await _reply(update.message, text)
 
 
-async def _send_signals(update_or_chat, context, signals, header: str | None = None):
+async def _send_signals(update_or_chat, context, signals, header: str | None = None,
+                        portfolio: bool = False):
     if header:
         await _reply(update_or_chat,
                      format_scan_summary(signals) if signals else header)
     for sig in signals[:_MAX_DETAIL_SIGNALS]:
         await _reply(update_or_chat, format_signal(sig, md=True))
+    if portfolio and signals:
+        settings: Settings = context.application.bot_data["settings"]
+        summary = portfolio_mod.summarize(
+            signals, settings.account_equity,
+            max_risk_pct=float(settings.risk.get("portfolio_max_risk_pct", 6.0)),
+            max_per_class=int(settings.risk.get("max_open_per_class", 5)))
+        text = portfolio_mod.format_summary(summary, settings.account_equity)
+        if text:
+            await _reply(update_or_chat, text)
 
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -155,7 +166,7 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         engine.scan_universe, settings, classes, True
     )
     await _reply(update.message, format_scan_summary(signals))
-    await _send_signals(update.message, context, signals)
+    await _send_signals(update.message, context, signals, portfolio=True)
 
 
 async def cmd_signal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -183,7 +194,7 @@ async def cmd_signal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"on the latest bar — the model stays flat."
         )
         return
-    await _send_signals(update.message, context, signals)
+    await _send_signals(update.message, context, signals, portfolio=True)
 
 
 async def cmd_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -193,7 +204,7 @@ async def cmd_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🔎 Scanning cointegration pairs…")
     signals = await asyncio.to_thread(engine.scan_pairs, settings, True)
     await _reply(update.message, format_scan_summary(signals))
-    await _send_signals(update.message, context, signals)
+    await _send_signals(update.message, context, signals, portfolio=True)
 
 
 async def cmd_factor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -203,7 +214,7 @@ async def cmd_factor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text("🔎 Scanning the cross-sectional momentum factor…")
     signals = await asyncio.to_thread(engine.scan_factor, settings, True)
     await _reply(update.message, format_scan_summary(signals))
-    await _send_signals(update.message, context, signals)
+    await _send_signals(update.message, context, signals, portfolio=True)
 
 
 async def cmd_ml(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -219,7 +230,7 @@ async def cmd_ml(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("🤖 Running the ML model across the universe… (slow)")
         signals = await asyncio.to_thread(engine.scan_ml, settings, True)
     await _reply(update.message, format_scan_summary(signals))
-    await _send_signals(update.message, context, signals)
+    await _send_signals(update.message, context, signals, portfolio=True)
 
 
 async def _scheduled_scan(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -233,6 +244,13 @@ async def _scheduled_scan(context: ContextTypes.DEFAULT_TYPE) -> None:
     await _broadcast(context.bot, chat_id, format_scan_summary(signals))
     for sig in signals[:_MAX_DETAIL_SIGNALS]:
         await _broadcast(context.bot, chat_id, format_signal(sig, md=True))
+    summary = portfolio_mod.summarize(
+        signals, settings.account_equity,
+        max_risk_pct=float(settings.risk.get("portfolio_max_risk_pct", 6.0)),
+        max_per_class=int(settings.risk.get("max_open_per_class", 5)))
+    text = portfolio_mod.format_summary(summary, settings.account_equity)
+    if text:
+        await _broadcast(context.bot, chat_id, text)
 
 
 # ---------------------------------------------------------------------

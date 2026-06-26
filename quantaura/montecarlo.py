@@ -92,6 +92,75 @@ def prob_target_before_stop(
     return float(win), float(baseline)
 
 
+def prob_spread_reversion(
+    z_now: float,
+    z_exit: float,
+    z_stop: float,
+    phi: float,
+    sigma_eps: float,
+    max_bars: int = 60,
+    n_sims: int = 4000,
+    seed: int = 11,
+):
+    """P(a pairs spread reverts to |z|<=z_exit before diverging to |z|>=z_stop).
+
+    The z-score is modelled as a discrete Ornstein-Uhlenbeck / AR(1)
+    process  z_t = phi·z_{t-1} + eps  (phi<1 -> mean reverting). This is
+    the correct model for a stat-arb trade — its edge is mean reversion of
+    the spread, not directional drift in either leg.
+
+    Returns (mc_win_prob, baseline). The baseline is the driftless
+    random-walk gambler's-ruin probability in the |z| interval.
+    """
+    span = z_stop - z_exit
+    baseline = (z_stop - abs(z_now)) / span if span > 0 else 0.0
+    baseline = float(min(1.0, max(0.0, baseline)))
+    if not (0.0 < phi < 1.0) or sigma_eps <= 0 or max_bars < 1:
+        return baseline, baseline
+
+    rng = np.random.default_rng(seed)
+    z = np.full(n_sims, float(z_now))
+    eps = rng.normal(0.0, sigma_eps, size=(n_sims, max_bars))
+    won = np.zeros(n_sims, dtype=bool)
+    done = np.zeros(n_sims, dtype=bool)
+    for t in range(max_bars):
+        z = phi * z + eps[:, t]
+        az = np.abs(z)
+        hit_exit = (~done) & (az <= z_exit)
+        hit_stop = (~done) & (az >= z_stop)
+        won |= hit_exit
+        done |= hit_exit | hit_stop
+    return float(won.mean()), baseline
+
+
+def assess_pairs(
+    *,
+    returns_R: list[float],
+    z_now: float,
+    z_exit: float,
+    z_stop: float,
+    phi: float,
+    sigma_eps: float,
+    ruin_R: float = 10.0,
+    max_bars: int = 60,
+) -> MonteCarloStats:
+    """Monte Carlo bundle for a pairs trade (spread-reversion win prob)."""
+    prob_profitable, median_total, p05_total, risk_of_ruin = bootstrap_paths(
+        returns_R, ruin_R=ruin_R
+    )
+    win_prob, baseline = prob_spread_reversion(
+        z_now, z_exit, z_stop, phi, sigma_eps, max_bars=max_bars
+    )
+    return MonteCarloStats(
+        prob_profitable=round(prob_profitable, 4),
+        median_total_R=round(median_total, 4),
+        p05_total_R=round(p05_total, 4),
+        risk_of_ruin=round(risk_of_ruin, 4),
+        win_prob=round(win_prob, 4),
+        baseline_win_prob=round(baseline, 4),
+    )
+
+
 def assess(
     *,
     side: Side,

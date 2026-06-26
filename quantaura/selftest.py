@@ -16,7 +16,7 @@ from . import indicators as ind
 from . import pairs as pairs_mod
 from . import risk as risk_mod
 from .backtest import backtest_strategy
-from .models import AssetClass, Side
+from .models import AssetClass, Side, Signal
 from .strategies import MeanReversion, TrendBreakout, detect_regime
 
 
@@ -314,6 +314,27 @@ def run_selftest() -> bool:
     ok &= _check("optimizer searched grid", len(opt_res) == 27)
     ok &= _check("optimizer ranked by score",
                  [r.score for r in opt_res] == sorted([r.score for r in opt_res], reverse=True))
+
+    # 12) pairs spread-reversion win-prob + portfolio risk -------------
+    print("\n[12] Spread-reversion win-prob + portfolio risk")
+    win, base = mc_mod.prob_spread_reversion(2.5, 0.5, 3.5, phi=0.5, sigma_eps=1.0)
+    ok &= _check("mean-reverting spread beats baseline", win > base and win > 0.7,
+                 f"{win:.2f} > {base:.2f}")
+    from . import portfolio as pf_mod
+    psig = [
+        Signal(symbol="A", asset_class=AssetClass.STOCK, strategy="x", side=Side.LONG,
+               entry=100, stop=98, target=104, risk_per_unit=2, reward_per_unit=4,
+               rr_ratio=2.0, risk_amount=300, position_notional=8000),
+        Signal(symbol="B", asset_class=AssetClass.CRYPTO, strategy="y", side=Side.SHORT,
+               entry=50, stop=52, target=46, risk_per_unit=2, reward_per_unit=4,
+               rr_ratio=2.0, risk_amount=400, position_notional=5000),
+    ]
+    summ = pf_mod.summarize(psig, equity=10000, max_risk_pct=6.0)
+    ok &= _check("portfolio totals correct",
+                 summ.total_risk == 700 and abs(summ.total_risk_pct - 7.0) < 1e-9)
+    ok &= _check("portfolio over-budget warning fires", len(summ.warnings) >= 1)
+    ok &= _check("portfolio summary renders",
+                 "Portfolio risk" in pf_mod.format_summary(summ, 10000))
 
     print("\n" + "=" * 50)
     print("RESULT:", "ALL CHECKS PASSED ✅" if ok else "SOME CHECKS FAILED ❌")

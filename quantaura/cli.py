@@ -27,6 +27,14 @@ def _cmd_scan(args, settings: Settings) -> int:
     for s in signals:
         print(format_signal(s, md=False))
         print("-" * 60)
+    from . import portfolio as portfolio_mod
+    summary = portfolio_mod.summarize(
+        signals, settings.account_equity,
+        max_risk_pct=float(settings.risk.get("portfolio_max_risk_pct", 6.0)),
+        max_per_class=int(settings.risk.get("max_open_per_class", 5)))
+    text = portfolio_mod.format_summary(summary, settings.account_equity)
+    if text:
+        print(text.replace("*", ""))
     return 0
 
 
