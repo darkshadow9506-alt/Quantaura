@@ -250,12 +250,31 @@ python -m quantaura bot
 | `/pairs` | scan the cointegration pairs |
 | `/factor` | scan the cross-sectional momentum factor |
 | `/ml [SYMBOL]` | gradient-boosting model signal(s) |
+| `/subscribe`, `/unsubscribe` | receive scheduled scans in this chat |
+| `/performance` | live track record of all published signals |
+| `/track` | resolve open signals against the latest prices |
 | `/status` | show the active configuration |
 
 A signal card shows side, entry/stop/target, R:R, ATR, suggested size and
 dollar risk, the originating strategy's backtest record, the out-of-sample
 record, the Monte Carlo win-probability / probability-of-profit / risk-of-
 ruin, any multi-strategy confluence, and a blended confidence bar.
+
+### Live tracking, deduplication & subscriptions
+
+Every published signal is journaled to a local SQLite database, which gives
+the bot three live-trading qualities:
+
+- **No spam (deduplication).** The same symbol+strategy+side is not
+  re-published while it is still open within a cooldown window
+  (`journal.cooldown_days`); repeats are counted and suppressed.
+- **A real track record.** `/track` resolves every open signal against the
+  latest price bars (did it hit the target or the stop?), and
+  `/performance` reports the live win rate, average R and total R — the
+  honest, forward equivalent of the backtest.
+- **Subscriptions.** `/subscribe` registers a chat for the scheduled scan
+  (every 6h), which first updates the journal, then broadcasts only the
+  *new* gated signals plus the portfolio summary to all subscribers.
 
 ## Data sources
 
@@ -273,7 +292,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 63 unit/integration tests (synthetic data, no network)
+pytest -q            # 72 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 
@@ -293,6 +312,8 @@ quantaura/
   montecarlo.py    bootstrap robustness + P(TP before SL) + spread-reversion
   optimize.py      walk-forward parameter search (scored out-of-sample)
   portfolio.py     batch risk: total risk-at-stop, exposure, concentration
+  storage.py       SQLite persistence (signals + subscribers), dedup
+  journal.py       resolve open signals to TP/SL, live track record
   risk.py          fixed-fractional + fractional-Kelly sizing
   backtest.py      event-driven, look-ahead-free backtester + R-metrics
   engine.py        orchestration: data -> signal, with the backtest gate

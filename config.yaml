@@ -166,6 +166,15 @@ ml:
   max_depth: 3
   learning_rate: 0.05
 
+# --- Journal / live tracking -----------------------------------------
+# The bot records every published signal to a local SQLite database so it
+# can deduplicate, track real outcomes (TP/SL), and report a live record.
+journal:
+  enabled: true
+  db_path: ""             # blank -> quantaura_state.db in the project root
+  cooldown_days: 3        # don't re-publish same symbol+strategy+side within this
+  max_hold_days: 30       # expire still-open signals after this many days
+
 # --- Risk management --------------------------------------------------
 risk:
   risk_per_trade_pct: 1.0     # risk 1% of equity per trade (fixed-fractional)

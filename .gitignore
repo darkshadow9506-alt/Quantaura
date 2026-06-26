@@ -19,6 +19,9 @@ data_cache/
 *.parquet
 *.pkl
 
+# Local state database
+*.db
+
 # OS / editor
 .DS_Store
 .idea/

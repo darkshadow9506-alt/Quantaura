@@ -33,10 +33,12 @@ from telegram.ext import (
 )
 
 from . import engine
+from . import journal as journal_mod
 from . import portfolio as portfolio_mod
 from .config import Settings
 from .data import asset_class_of
 from .formatting import format_scan_summary, format_signal
+from .storage import DEFAULT_DB, Store
 
 log = logging.getLogger("quantaura.bot")
 
@@ -97,6 +99,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• `/pairs` — scan cointegration pairs\n"
         "• `/factor` — scan the cross-sectional momentum factor\n"
         "• `/ml [SYMBOL]` — gradient-boosting model signal(s)\n"
+        "• `/subscribe` · `/unsubscribe` — scheduled scans in this chat\n"
+        "• `/performance` — live track record of published signals\n"
+        "• `/track` — resolve open signals against the latest prices\n"
         "• `/status` — show configuration\n\n"
         "Examples: `/signal AAPL` · `/signal EURUSD=X` · `/signal BTC/USDT`"
     )
@@ -129,22 +134,49 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await _reply(update.message, text)
 
 
-async def _send_signals(update_or_chat, context, signals, header: str | None = None,
-                        portfolio: bool = False):
-    if header:
-        await _reply(update_or_chat,
-                     format_scan_summary(signals) if signals else header)
-    for sig in signals[:_MAX_DETAIL_SIGNALS]:
-        await _reply(update_or_chat, format_signal(sig, md=True))
-    if portfolio and signals:
+def _record_new(context, signals: list) -> tuple[list, int]:
+    """Record gated signals to the journal; split into (new, repeat_count).
+
+    A signal whose symbol+strategy+side is already open within the cooldown
+    is treated as a repeat and suppressed (no spam on every scan).
+    """
+    settings: Settings = context.application.bot_data["settings"]
+    store: Store | None = context.application.bot_data.get("store")
+    jcfg = settings.section("journal")
+    if store is None or not jcfg.get("enabled", True):
+        return list(signals), 0
+    cooldown = float(jcfg.get("cooldown_days", 3))
+    new, repeats = [], 0
+    for s in signals:
+        if not s.passed_gate:        # only journal genuinely published signals
+            new.append(s)
+            continue
+        if store.record_signal(s, cooldown):
+            new.append(s)
+        else:
+            repeats += 1
+    return new, repeats
+
+
+async def _publish(target, context, signals, record: bool = True,
+                   portfolio: bool = True):
+    """Send a batch of signals: summary, detail cards, repeats note, portfolio."""
+    new, repeats = _record_new(context, signals) if record else (list(signals), 0)
+    await _reply(target, format_scan_summary(new))
+    for sig in new[:_MAX_DETAIL_SIGNALS]:
+        await _reply(target, format_signal(sig, md=True))
+    if repeats:
+        await _reply(target, f"🔁 {repeats} repeat signal(s) suppressed "
+                             f"(already open within cooldown).")
+    if portfolio and new:
         settings: Settings = context.application.bot_data["settings"]
         summary = portfolio_mod.summarize(
-            signals, settings.account_equity,
+            new, settings.account_equity,
             max_risk_pct=float(settings.risk.get("portfolio_max_risk_pct", 6.0)),
             max_per_class=int(settings.risk.get("max_open_per_class", 5)))
         text = portfolio_mod.format_summary(summary, settings.account_equity)
         if text:
-            await _reply(update_or_chat, text)
+            await _reply(target, text)
 
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -165,8 +197,7 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     signals = await asyncio.to_thread(
         engine.scan_universe, settings, classes, True
     )
-    await _reply(update.message, format_scan_summary(signals))
-    await _send_signals(update.message, context, signals, portfolio=True)
+    await _publish(update.message, context, signals)
 
 
 async def cmd_signal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -194,7 +225,8 @@ async def cmd_signal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"on the latest bar — the model stays flat."
         )
         return
-    await _send_signals(update.message, context, signals, portfolio=True)
+    # /signal is inspection (may be below gate) -> don't journal/dedup it
+    await _publish(update.message, context, signals, record=False)
 
 
 async def cmd_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -203,8 +235,7 @@ async def cmd_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text("🔎 Scanning cointegration pairs…")
     signals = await asyncio.to_thread(engine.scan_pairs, settings, True)
-    await _reply(update.message, format_scan_summary(signals))
-    await _send_signals(update.message, context, signals, portfolio=True)
+    await _publish(update.message, context, signals)
 
 
 async def cmd_factor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -213,8 +244,7 @@ async def cmd_factor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     await update.message.reply_text("🔎 Scanning the cross-sectional momentum factor…")
     signals = await asyncio.to_thread(engine.scan_factor, settings, True)
-    await _reply(update.message, format_scan_summary(signals))
-    await _send_signals(update.message, context, signals, portfolio=True)
+    await _publish(update.message, context, signals)
 
 
 async def cmd_ml(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -226,31 +256,105 @@ async def cmd_ml(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ac = asset_class_of(symbol, settings.universe)
         await update.message.reply_text(f"🤖 Training the ML model on {symbol}…")
         signals = await asyncio.to_thread(engine.scan_ml_symbol, symbol, ac, settings, False)
+        record = False                       # single-symbol /ml is inspection
     else:
         await update.message.reply_text("🤖 Running the ML model across the universe… (slow)")
         signals = await asyncio.to_thread(engine.scan_ml, settings, True)
-    await _reply(update.message, format_scan_summary(signals))
-    await _send_signals(update.message, context, signals, portfolio=True)
+        record = True
+    await _publish(update.message, context, signals, record=record)
+
+
+async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if not await _guard(settings, update):
+        return
+    store: Store | None = context.application.bot_data.get("store")
+    if store is None:
+        await update.message.reply_text("Journaling is disabled, so subscriptions are off.")
+        return
+    store.add_subscriber(update.effective_chat.id)
+    await update.message.reply_text(
+        "✅ Subscribed. You'll receive scheduled signal scans in this chat.")
+
+
+async def cmd_unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if not await _guard(settings, update):
+        return
+    store: Store | None = context.application.bot_data.get("store")
+    if store is None:
+        return
+    removed = store.remove_subscriber(update.effective_chat.id)
+    await update.message.reply_text(
+        "✅ Unsubscribed." if removed else "You were not subscribed.")
+
+
+async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if not await _guard(settings, update):
+        return
+    store: Store | None = context.application.bot_data.get("store")
+    if store is None:
+        await update.message.reply_text("Journaling is disabled.")
+        return
+    await _reply(update.message, journal_mod.format_performance(store.performance()))
+
+
+async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if not await _guard(settings, update):
+        return
+    store: Store | None = context.application.bot_data.get("store")
+    if store is None:
+        await update.message.reply_text("Journaling is disabled.")
+        return
+    await update.message.reply_text("⏱ Resolving open signals against the latest prices…")
+    max_hold = int(settings.section("journal").get("max_hold_days", 30))
+    s = await asyncio.to_thread(journal_mod.update_open_signals, store, settings, max_hold)
+    await update.message.reply_text(
+        f"Checked {s['checked']} open signal(s): {s['tp']} hit target, "
+        f"{s['sl']} stopped, {s['expired']} expired.")
+    await _reply(update.message, journal_mod.format_performance(store.performance()))
 
 
 async def _scheduled_scan(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
-    chat_id = settings.telegram_broadcast_chat_id
-    if not chat_id:
-        return
+    store: Store | None = context.application.bot_data.get("store")
+
+    # 1) resolve open signals against fresh prices before scanning
+    if store is not None:
+        try:
+            max_hold = int(settings.section("journal").get("max_hold_days", 30))
+            await asyncio.to_thread(journal_mod.update_open_signals, store, settings, max_hold)
+        except Exception:
+            log.warning("journal update failed", exc_info=True)
+
+    # 2) scan, record new (dedup), broadcast to env id + all subscribers
     signals = await asyncio.to_thread(engine.scan_universe, settings, None, True)
-    if not signals:
+    new, _ = _record_new(context, signals) if store is not None else (signals, 0)
+    if not new:
         return
-    await _broadcast(context.bot, chat_id, format_scan_summary(signals))
-    for sig in signals[:_MAX_DETAIL_SIGNALS]:
-        await _broadcast(context.bot, chat_id, format_signal(sig, md=True))
-    summary = portfolio_mod.summarize(
-        signals, settings.account_equity,
-        max_risk_pct=float(settings.risk.get("portfolio_max_risk_pct", 6.0)),
-        max_per_class=int(settings.risk.get("max_open_per_class", 5)))
-    text = portfolio_mod.format_summary(summary, settings.account_equity)
-    if text:
-        await _broadcast(context.bot, chat_id, text)
+    recipients: set[str] = set()
+    if settings.telegram_broadcast_chat_id:
+        recipients.add(settings.telegram_broadcast_chat_id)
+    if store is not None:
+        recipients |= {str(c) for c in store.subscribers()}
+    if not recipients:
+        return
+
+    summary_text = format_scan_summary(new)
+    port = portfolio_mod.format_summary(
+        portfolio_mod.summarize(
+            new, settings.account_equity,
+            max_risk_pct=float(settings.risk.get("portfolio_max_risk_pct", 6.0)),
+            max_per_class=int(settings.risk.get("max_open_per_class", 5))),
+        settings.account_equity)
+    for chat_id in recipients:
+        await _broadcast(context.bot, chat_id, summary_text)
+        for sig in new[:_MAX_DETAIL_SIGNALS]:
+            await _broadcast(context.bot, chat_id, format_signal(sig, md=True))
+        if port:
+            await _broadcast(context.bot, chat_id, port)
 
 
 # ---------------------------------------------------------------------
@@ -262,6 +366,14 @@ def build_application(settings: Settings) -> Application:
     app = Application.builder().token(settings.telegram_token).build()
     app.bot_data["settings"] = settings
 
+    # local SQLite journal (dedup, live track record, subscribers)
+    store = None
+    jcfg = settings.section("journal")
+    if jcfg.get("enabled", True):
+        store = Store(jcfg.get("db_path") or str(DEFAULT_DB))
+        log.info("Journal enabled at %s", store.path)
+    app.bot_data["store"] = store
+
     app.add_handler(CommandHandler(["start", "help"], cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("scan", cmd_scan))
@@ -269,9 +381,14 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("pairs", cmd_pairs))
     app.add_handler(CommandHandler("factor", cmd_factor))
     app.add_handler(CommandHandler("ml", cmd_ml))
+    app.add_handler(CommandHandler("subscribe", cmd_subscribe))
+    app.add_handler(CommandHandler("unsubscribe", cmd_unsubscribe))
+    app.add_handler(CommandHandler("performance", cmd_performance))
+    app.add_handler(CommandHandler("track", cmd_track))
 
-    # optional scheduled broadcast (needs the job-queue extra + a chat id)
-    if settings.telegram_broadcast_chat_id and app.job_queue is not None:
+    # scheduled scan: runs if the job-queue extra is installed and there is
+    # somewhere to send (a broadcast id or the subscriber journal).
+    if app.job_queue is not None and (settings.telegram_broadcast_chat_id or store is not None):
         app.job_queue.run_repeating(_scheduled_scan, interval=6 * 3600, first=30)
         log.info("Scheduled scan enabled (every 6h).")
 
