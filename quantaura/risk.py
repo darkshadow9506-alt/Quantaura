@@ -96,3 +96,32 @@ def confidence_from_backtest(
     pf = max(0.0, min(1.0, (profit_factor - 1.0) / 1.0))        # 1.0->0, 2.0->1
     sh = max(0.0, min(1.0, sharpe / 2.0))                       # 0->0, 2.0->1
     return round(0.40 * wr + 0.35 * pf + 0.25 * sh, 3)
+
+
+def combined_confidence(
+    *,
+    backtest_conf: float,
+    prob_profitable: float,
+    mc_win_prob: float,
+    baseline_win_prob: float,
+    oos_expectancy_R: float,
+    confluence: int = 1,
+) -> float:
+    """Blend every independent quality signal into one 0..1 score.
+
+    - backtest quality (in-sample edge)
+    - Monte Carlo probability the edge is profitable forward
+    - how much the modelled win-prob beats the no-edge baseline
+    - whether the edge persisted out-of-sample
+    - a small bonus when multiple strategies agree (confluence)
+    """
+    edge_vs_baseline = max(0.0, min(1.0, (mc_win_prob - baseline_win_prob) / 0.25 + 0.5))
+    oos_ok = 1.0 if oos_expectancy_R > 0 else (0.5 if oos_expectancy_R == 0 else 0.0)
+    base = (
+        0.35 * backtest_conf
+        + 0.30 * max(0.0, min(1.0, prob_profitable))
+        + 0.20 * edge_vs_baseline
+        + 0.15 * oos_ok
+    )
+    bonus = min(0.10, 0.05 * max(0, confluence - 1))  # +5% per extra agreeing strategy
+    return round(min(1.0, base + bonus), 3)

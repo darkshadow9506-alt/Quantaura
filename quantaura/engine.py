@@ -6,12 +6,15 @@ For each symbol:
   3. run every enabled strategy whose preferred regime matches (or
      'neutral' -> run all); take the latest-bar TradePlan if any
   4. backtest THAT strategy on THAT symbol's history
-  5. only publish the signal if the backtest clears the signal_gate
-  6. size the position (fixed-fractional capped, half-Kelly) and attach
-     confidence derived from the backtest
+  5. validate it out-of-sample (walk-forward) and with a Monte Carlo
+     bootstrap; only publish if it clears the full signal_gate
+  6. size the position (fixed-fractional capped, half-Kelly), attach the
+     Monte Carlo win-probability, and blend everything into a confidence
+  7. boost confidence when multiple strategies agree (confluence)
 
 This is the mechanism that keeps signals honest: nothing is published
-without a measured historical edge on the very instrument it targets.
+without a measured, out-of-sample, Monte-Carlo-robust edge on the very
+instrument it targets.
 """
 from __future__ import annotations
 
@@ -22,23 +25,45 @@ import pandas as pd
 
 from . import data as data_mod
 from . import factor as factor_mod
+from . import montecarlo as mc_mod
 from . import pairs as pairs_mod
 from . import risk as risk_mod
-from .backtest import backtest_strategy
+from .backtest import backtest_strategy, out_of_sample
 from .config import Settings
 from .indicators import atr as atr_ind
-from .models import AssetClass, BacktestStats, PairSignal, Side, Signal
+from .models import (
+    AssetClass,
+    BacktestStats,
+    MonteCarloStats,
+    PairSignal,
+    Side,
+    Signal,
+)
 from .strategies import build_strategies, detect_regime
 
 
 # ---------------------------------------------------------------------
-def _passes_gate(stats: BacktestStats, gate: dict) -> bool:
-    return (
+def _passes_gate(
+    stats: BacktestStats, oos: BacktestStats, mc: MonteCarloStats, gate: dict
+) -> bool:
+    """Base in-sample edge + out-of-sample persistence + MC robustness."""
+    base = (
         stats.trades >= int(gate.get("min_backtest_trades", 15))
         and stats.win_rate >= float(gate.get("min_win_rate", 0.40))
         and stats.profit_factor >= float(gate.get("min_profit_factor", 1.15))
         and stats.sharpe >= float(gate.get("min_sharpe", 0.3))
     )
+    if not base:
+        return False
+    # Monte Carlo: the edge must be probably-profitable forward
+    if mc.prob_profitable < float(gate.get("min_prob_profitable", 0.60)):
+        return False
+    # walk-forward: if we have enough out-of-sample trades, the edge must
+    # have survived the holdout (positive expectancy). Too few -> skip check.
+    if oos.trades >= int(gate.get("oos_min_trades", 4)):
+        if oos.expectancy_R <= float(gate.get("oos_min_expectancy_R", 0.0)):
+            return False
+    return True
 
 
 def _kelly_b(win_rate: float, profit_factor: float) -> float:
@@ -46,6 +71,54 @@ def _kelly_b(win_rate: float, profit_factor: float) -> float:
     if win_rate <= 0 or win_rate >= 1 or not math.isfinite(profit_factor):
         return 0.0
     return profit_factor * (1.0 - win_rate) / win_rate
+
+
+def _recent_drift(df: Optional[pd.DataFrame], n: int = 14) -> float:
+    """Average per-bar price change over the last n bars (momentum proxy)."""
+    if df is None or "close" not in df or len(df) < n + 1:
+        return 0.0
+    diffs = df["close"].diff().dropna().tail(n)
+    return float(diffs.mean()) if len(diffs) else 0.0
+
+
+def _assess(
+    side: Side, entry: float, stop: float, target: float, atr: float,
+    stats: BacktestStats, drift: float, gate: dict,
+):
+    """Compute (oos, montecarlo) for a candidate signal."""
+    oos = out_of_sample(stats, float(gate.get("oos_split", 0.7)))
+    mc = mc_mod.assess(
+        side=side, entry=entry, stop=stop, target=target,
+        returns_R=stats.returns_R, atr=atr, drift=drift,
+        ruin_R=float(gate.get("ruin_R", 10.0)),
+        max_bars=int(gate.get("mc_max_bars", 60)),
+    )
+    return oos, mc
+
+
+def _confidence(stats: BacktestStats, oos: BacktestStats, mc: MonteCarloStats,
+                confluence: int = 1) -> float:
+    bt = risk_mod.confidence_from_backtest(stats.win_rate, stats.profit_factor, stats.sharpe)
+    return risk_mod.combined_confidence(
+        backtest_conf=bt,
+        prob_profitable=mc.prob_profitable,
+        mc_win_prob=mc.win_prob,
+        baseline_win_prob=mc.baseline_win_prob,
+        oos_expectancy_R=oos.expectancy_R,
+        confluence=confluence,
+    )
+
+
+def _sized(settings: Settings, entry: float, risk_per_unit: float, stats: BacktestStats):
+    risk_cfg = settings.risk
+    b = _kelly_b(stats.win_rate, stats.profit_factor)
+    return risk_mod.size_position(
+        equity=settings.account_equity, entry=entry, risk_per_unit=risk_per_unit,
+        win_rate=stats.win_rate, avg_win_R=b, avg_loss_R=1.0,
+        risk_per_trade_pct=float(risk_cfg.get("risk_per_trade_pct", 1.0)),
+        kelly_fraction_mult=float(risk_cfg.get("kelly_fraction", 0.5)),
+        max_kelly_pct=float(risk_cfg.get("max_kelly_pct", 5.0)),
+    )
 
 
 def _build_signal(
@@ -58,23 +131,12 @@ def _build_signal(
     regime: str,
     settings: Settings,
     passed_gate: bool,
+    drift: float = 0.0,
 ) -> Signal:
-    risk_cfg = settings.risk
-    b = _kelly_b(stats.win_rate, stats.profit_factor)
-    sizing = risk_mod.size_position(
-        equity=settings.account_equity,
-        entry=plan.entry,
-        risk_per_unit=plan.risk_per_unit,
-        win_rate=stats.win_rate,
-        avg_win_R=b,
-        avg_loss_R=1.0,
-        risk_per_trade_pct=float(risk_cfg.get("risk_per_trade_pct", 1.0)),
-        kelly_fraction_mult=float(risk_cfg.get("kelly_fraction", 0.5)),
-        max_kelly_pct=float(risk_cfg.get("max_kelly_pct", 5.0)),
-    )
-    confidence = risk_mod.confidence_from_backtest(
-        stats.win_rate, stats.profit_factor, stats.sharpe
-    )
+    gate = settings.signal_gate
+    oos, mc = _assess(plan.side, plan.entry, plan.stop, plan.target, plan.atr,
+                      stats, drift, gate)
+    sizing = _sized(settings, plan.entry, plan.risk_per_unit, stats)
     return Signal(
         symbol=symbol,
         asset_class=asset_class,
@@ -93,7 +155,9 @@ def _build_signal(
         regime=regime,
         rationale=plan.rationale,
         backtest=stats,
-        confidence=confidence,
+        oos=oos,
+        montecarlo=mc,
+        confidence=_confidence(stats, oos, mc),
         passed_gate=passed_gate,
         timeframe=settings.data.get("timeframe", "1d"),
         price_at_signal=round(plan.entry, 6),
@@ -122,6 +186,7 @@ def scan_symbol(
 
     regime = detect_regime(df, settings.regime)
     gate = settings.signal_gate
+    drift = _recent_drift(df, int(settings.regime.get("adx_period", 14)))
     out: list[Signal] = []
 
     for strat in build_strategies(settings):
@@ -134,7 +199,9 @@ def scan_symbol(
         if plan is None or not plan.valid():
             continue
         stats, _ = backtest_strategy(strat, df)
-        passed = _passes_gate(stats, gate)
+        oos, mc = _assess(plan.side, plan.entry, plan.stop, plan.target, plan.atr,
+                          stats, drift, gate)
+        passed = _passes_gate(stats, oos, mc, gate)
         if publish_only and not passed:
             continue
         out.append(
@@ -147,9 +214,27 @@ def scan_symbol(
                 regime=regime,
                 settings=settings,
                 passed_gate=passed,
+                drift=drift,
             )
         )
+
+    # confluence: when several strategies agree on the same direction,
+    # raise confidence (independent confirmations of the same idea).
+    _apply_confluence(out)
     return out
+
+
+def _apply_confluence(signals: list[Signal]) -> None:
+    by_side: dict[Side, list[Signal]] = {}
+    for s in signals:
+        by_side.setdefault(s.side, []).append(s)
+    for side, group in by_side.items():
+        n = len(group)
+        if n <= 1:
+            continue
+        for s in group:
+            s.confluence = n
+            s.confidence = _confidence(s.backtest, s.oos, s.montecarlo, confluence=n)
 
 
 # ---------------------------------------------------------------------
@@ -194,27 +279,14 @@ def scan_pairs(settings: Settings, publish_only: bool = True) -> list[PairSignal
         if plan is None:
             continue
         stats = pairs_mod.backtest_pair(da["close"], db["close"], pcfg)
-        passed = _passes_gate(stats, gate)
+        drift_a = _recent_drift(da, 14)
+        oos, mc = _assess(plan.side_a, plan.entry_a, plan.stop_a, plan.target_a,
+                          atr_a, stats, drift_a, gate)
+        passed = _passes_gate(stats, oos, mc, gate)
         if publish_only and not passed:
             continue
 
-        # size on leg A
-        risk_cfg = settings.risk
-        b = _kelly_b(stats.win_rate, stats.profit_factor)
-        sizing = risk_mod.size_position(
-            equity=settings.account_equity,
-            entry=plan.entry_a,
-            risk_per_unit=plan.risk_per_unit,
-            win_rate=stats.win_rate,
-            avg_win_R=b,
-            avg_loss_R=1.0,
-            risk_per_trade_pct=float(risk_cfg.get("risk_per_trade_pct", 1.0)),
-            kelly_fraction_mult=float(risk_cfg.get("kelly_fraction", 0.5)),
-            max_kelly_pct=float(risk_cfg.get("max_kelly_pct", 5.0)),
-        )
-        confidence = risk_mod.confidence_from_backtest(
-            stats.win_rate, stats.profit_factor, stats.sharpe
-        )
+        sizing = _sized(settings, plan.entry_a, plan.risk_per_unit, stats)
         leg_b_side = Side.SHORT if plan.side_a is Side.LONG else Side.LONG
         out.append(
             PairSignal(
@@ -235,7 +307,9 @@ def scan_pairs(settings: Settings, publish_only: bool = True) -> list[PairSignal
                 regime="stat-arb",
                 rationale=plan.rationale,
                 backtest=stats,
-                confidence=confidence,
+                oos=oos,
+                montecarlo=mc,
+                confidence=_confidence(stats, oos, mc),
                 passed_gate=passed,
                 timeframe=d.get("timeframe", "1d"),
                 price_at_signal=round(plan.entry_a, 6),
@@ -288,19 +362,16 @@ def scan_factor(settings: Settings, publish_only: bool = True) -> list[Signal]:
             continue
 
         legs = factor_mod.rank_live(frames, fcfg)
-        confidence = risk_mod.confidence_from_backtest(
-            stats.win_rate, stats.profit_factor, stats.sharpe
-        )
-        risk_cfg = settings.risk
-        b = _kelly_b(stats.win_rate, stats.profit_factor)
+        gate = settings.signal_gate
+        oos = out_of_sample(stats, float(gate.get("oos_split", 0.7)))
         for leg in legs:
-            sizing = risk_mod.size_position(
-                equity=settings.account_equity, entry=leg.entry,
-                risk_per_unit=leg.risk_per_unit, win_rate=stats.win_rate,
-                avg_win_R=b, avg_loss_R=1.0,
-                risk_per_trade_pct=float(risk_cfg.get("risk_per_trade_pct", 1.0)),
-                kelly_fraction_mult=float(risk_cfg.get("kelly_fraction", 0.5)),
-                max_kelly_pct=float(risk_cfg.get("max_kelly_pct", 5.0)),
+            sizing = _sized(settings, leg.entry, leg.risk_per_unit, stats)
+            drift = _recent_drift(frames.get(leg.symbol), 14)
+            mc = mc_mod.assess(
+                side=leg.side, entry=leg.entry, stop=leg.stop, target=leg.target,
+                returns_R=stats.returns_R, atr=leg.atr, drift=drift,
+                ruin_R=float(gate.get("ruin_R", 10.0)),
+                max_bars=int(gate.get("mc_max_bars", 60)),
             )
             rr = (abs(leg.target - leg.entry) / leg.risk_per_unit
                   if leg.risk_per_unit > 0 else 0.0)
@@ -316,7 +387,8 @@ def scan_factor(settings: Settings, publish_only: bool = True) -> list[Signal]:
                 rationale=(f"Ranked #{leg.rank} by 6-1 momentum "
                            f"({leg.score*100:+.1f}%) among {cls} — "
                            f"{'strongest→long' if leg.side is Side.LONG else 'weakest→short'}."),
-                backtest=stats, confidence=confidence, passed_gate=passed,
+                backtest=stats, oos=oos, montecarlo=mc,
+                confidence=_confidence(stats, oos, mc), passed_gate=passed,
                 timeframe=d.get("timeframe", "1d"), price_at_signal=round(leg.entry, 6),
             ))
     return out

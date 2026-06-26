@@ -48,6 +48,11 @@ def test_scan_symbol_orchestration(monkeypatch, settings):
             assert s.stop < s.entry < s.target
         # backtest stats attached
         assert s.backtest.trades >= 0
+        # Monte Carlo + out-of-sample layers attached and sane
+        assert 0.0 <= s.montecarlo.win_prob <= 1.0
+        assert 0.0 <= s.montecarlo.prob_profitable <= 1.0
+        assert 0.0 <= s.montecarlo.risk_of_ruin <= 1.0
+        assert s.confluence >= 1
 
 
 def test_scan_symbol_robust_to_bad_data(monkeypatch, settings):

@@ -166,3 +166,11 @@ signal_gate:
   min_win_rate: 0.40
   min_profit_factor: 1.15
   min_sharpe: 0.3       # significance score (mean/std·√N), not annualized Sharpe
+  # --- Monte Carlo robustness ---
+  min_prob_profitable: 0.60   # bootstrap P(edge profitable forward) must clear this
+  ruin_R: 10.0                # "ruin" = a 10R (≈10%) drawdown at 1% risk/trade
+  mc_max_bars: 60             # horizon for the P(TP before SL) simulation
+  # --- Walk-forward (out-of-sample) ---
+  oos_split: 0.7              # train on first 70% of trades, validate on last 30%
+  oos_min_trades: 4           # only enforce the OOS check with enough holdout trades
+  oos_min_expectancy_R: 0.0   # out-of-sample expectancy must stay positive

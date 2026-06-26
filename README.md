@@ -104,6 +104,35 @@ data up to the signal bar; exits walk forward bar-by-bar; if a bar's range
 spans both stop and target we pessimistically assume the stop filled first.
 Thresholds live in `config.yaml → signal_gate` and are fully tunable.
 
+### The win-rate / robustness layer
+
+Beyond the raw backtest, four extra checks raise the quality of what gets
+published (all standard quant practice — your source doc lists "out-of-sample
+testing, walk-forward analysis" and "Monte Carlo simulation of extreme
+scenarios"):
+
+- **Walk-forward / out-of-sample gate.** History is split (default
+  70/30); the edge must *also* be positive on the held-out tail. This is
+  the single most important defence against curve-fitting — a strategy
+  that only worked in the first part of history is rejected.
+- **Monte Carlo bootstrap.** The backtested trade outcomes are resampled
+  thousands of times to estimate the **probability the edge is profitable
+  forward**, the bad-case (5th-percentile) result, and the **risk of
+  ruin** (probability of a 10R drawdown). A signal must clear
+  `min_prob_profitable` (default 60%).
+- **Per-signal win probability.** A Monte Carlo barrier simulation models
+  price as a random walk with the symbol's *current* drift and volatility
+  (ATR) to estimate **P(take-profit before stop)**, shown next to the
+  driftless baseline `1/(1+RR)`. If the modelled probability beats the
+  baseline, the measured momentum is genuinely tilting the odds.
+- **Multi-strategy confluence.** When several independent strategies fire
+  the same direction on the same symbol, confidence is boosted — these are
+  independent confirmations of the same idea.
+
+All of these feed a single blended **confidence** score (0–100%) shown on
+every signal. None of them is a guarantee — they are honest probability
+estimates that make weak setups visibly weak.
+
 ### Risk management
 
 - **Fixed-fractional sizing:** never risk more than `risk_per_trade_pct`
@@ -177,8 +206,9 @@ python -m quantaura bot
 | `/status` | show the active configuration |
 
 A signal card shows side, entry/stop/target, R:R, ATR, suggested size and
-dollar risk, the originating strategy's backtest record, and a confidence
-bar derived from that backtest.
+dollar risk, the originating strategy's backtest record, the out-of-sample
+record, the Monte Carlo win-probability / probability-of-profit / risk-of-
+ruin, any multi-strategy confluence, and a blended confidence bar.
 
 ## Data sources
 
@@ -196,7 +226,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 34 unit/integration tests (synthetic data, no network)
+pytest -q            # 43 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 
@@ -212,6 +242,7 @@ quantaura/
                    MeanReversion, ADX regime filter
   pairs.py         Engle-Granger cointegration pairs (stat-arb)
   factor.py        cross-sectional momentum factor + panel backtest
+  montecarlo.py    bootstrap robustness + P(TP before SL) win-probability
   risk.py          fixed-fractional + fractional-Kelly sizing
   backtest.py      event-driven, look-ahead-free backtester + R-metrics
   engine.py        orchestration: data -> signal, with the backtest gate

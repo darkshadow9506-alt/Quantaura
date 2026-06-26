@@ -29,6 +29,26 @@ class BacktestStats:
     max_drawdown: float = 0.0
     avg_R: float = 0.0
     expectancy_R: float = 0.0
+    # chronological per-trade R outcomes (used for OOS split + Monte Carlo).
+    # Excluded from as_dict() to keep serialized signals compact.
+    returns_R: list[float] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d.pop("returns_R", None)
+        return d
+
+
+@dataclass
+class MonteCarloStats:
+    """Probabilistic robustness of the backtested edge."""
+
+    prob_profitable: float = 0.0     # P(positive total over a forward run)
+    median_total_R: float = 0.0
+    p05_total_R: float = 0.0         # 5th-percentile (bad-case) outcome
+    risk_of_ruin: float = 1.0        # P(drawdown breaches the ruin threshold)
+    win_prob: float = 0.0            # MC P(hit TP before SL) given drift+vol
+    baseline_win_prob: float = 0.0   # driftless structural baseline = 1/(1+RR)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -68,7 +88,10 @@ class Signal:
     regime: str = ""
     rationale: str = ""
     backtest: BacktestStats = field(default_factory=BacktestStats)
-    confidence: float = 0.0       # 0..1, derived from backtest quality
+    oos: BacktestStats = field(default_factory=BacktestStats)   # out-of-sample
+    montecarlo: MonteCarloStats = field(default_factory=MonteCarloStats)
+    confluence: int = 1           # how many strategies agree (same symbol+side)
+    confidence: float = 0.0       # 0..1, blended quality score
     passed_gate: bool = False
 
     timeframe: str = "1d"
@@ -82,6 +105,9 @@ class Signal:
         d = asdict(self)
         d["asset_class"] = self.asset_class.value
         d["side"] = self.side.value
+        for key in ("backtest", "oos"):
+            if isinstance(d.get(key), dict):
+                d[key].pop("returns_R", None)
         return d
 
     def is_valid_geometry(self) -> bool:

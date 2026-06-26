@@ -57,6 +57,19 @@ def format_signal(sig: Signal, md: bool = True) -> str:
         f"PF {bt.profit_factor:.2f} | exp {bt.expectancy_R:+.2f}R | "
         f"maxDD {bt.max_drawdown:.1f}R"
     )
+    oos = sig.oos
+    if oos.trades > 0:
+        lines.append(
+            f"🧪 Out-of-sample: {oos.trades} trades | win {oos.win_rate*100:.0f}% | "
+            f"exp {oos.expectancy_R:+.2f}R"
+        )
+    mc = sig.montecarlo
+    lines.append(
+        f"🎲 Win prob (model): {mc.win_prob*100:.0f}% vs {mc.baseline_win_prob*100:.0f}% "
+        f"baseline | P(profit) {mc.prob_profitable*100:.0f}% | ruin {mc.risk_of_ruin*100:.0f}%"
+    )
+    if sig.confluence > 1:
+        lines.append(f"🔗 Confluence: {sig.confluence} strategies agree on {sig.side.value}")
     lines.append(f"🔆 Confidence: {_bar(sig.confidence)} {sig.confidence*100:.0f}%")
     if not sig.passed_gate:
         lines.append("❗ Below publish threshold — shown for inspection only.")

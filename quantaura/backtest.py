@@ -60,7 +60,21 @@ def stats_from_R(returns_R: list[float]) -> BacktestStats:
         max_drawdown=round(max_dd, 4),
         avg_R=round(float(arr.mean()), 4),
         expectancy_R=round(float(arr.mean()), 4),
+        returns_R=[round(float(x), 6) for x in arr],
     )
+
+
+def out_of_sample(stats: BacktestStats, split: float = 0.7) -> BacktestStats:
+    """Walk-forward holdout: stats on the most recent (1-split) of trades.
+
+    `returns_R` is chronological, so slicing the tail gives a genuine
+    out-of-sample window the strategy parameters never 'saw'.
+    """
+    r = stats.returns_R
+    if len(r) < 4:
+        return BacktestStats()
+    cut = int(len(r) * split)
+    return stats_from_R(r[cut:])
 
 
 # ---------------------------------------------------------------------

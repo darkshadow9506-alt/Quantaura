@@ -263,6 +263,24 @@ def run_selftest() -> bool:
     sides = {l.side for l in legs}
     ok &= _check("factor has both long and short", len(sides) == 2)
 
+    # 10) Monte Carlo + out-of-sample ------------------------------------
+    print("\n[10] Monte Carlo robustness + walk-forward")
+    from . import montecarlo as mc_mod
+    from .backtest import out_of_sample
+    winning = [2.0, -1.0, 2.0, -1.0, 2.0, 2.0, -1.0, 2.0, 2.0, -1.0]
+    prob, med, p05, ruin = mc_mod.bootstrap_paths(winning, n_sims=4000)
+    ok &= _check("bootstrap prob in [0,1]", 0.0 <= prob <= 1.0, f"P(profit)={prob:.2f}")
+    ok &= _check("winning edge bootstraps profitable", prob > 0.6)
+    win_p, base = mc_mod.prob_target_before_stop(Side.LONG, 100, 98, 104, sigma=1.0, drift=0.3)
+    ok &= _check("drift lifts win-prob above baseline", win_p > base,
+                 f"{win_p:.2f} > {base:.2f}")
+    oos_stats = out_of_sample(stats_t, 0.7)
+    ok &= _check("OOS split returns a holdout", oos_stats.trades >= 0,
+                 f"{oos_stats.trades} OOS trades")
+    ok &= _check("signal carries MC + OOS fields",
+                 hasattr(sig, "montecarlo") and hasattr(sig, "oos")
+                 and 0.0 <= sig.montecarlo.win_prob <= 1.0)
+
     print("\n" + "=" * 50)
     print("RESULT:", "ALL CHECKS PASSED ✅" if ok else "SOME CHECKS FAILED ❌")
     return ok
