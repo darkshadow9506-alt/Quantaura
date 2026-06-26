@@ -33,7 +33,8 @@ _YF_INTERVAL = {"1d": "1d", "1h": "1h", "1wk": "1wk", "1w": "1wk"}
 
 def _cache_path(key: str) -> Path:
     safe = key.replace("/", "_").replace("=", "_").replace(":", "_")
-    return CACHE_DIR / f"{safe}.parquet"
+    # pickle keeps caching dependency-free (parquet would need pyarrow)
+    return CACHE_DIR / f"{safe}.pkl"
 
 
 def _read_cache(key: str, max_age_minutes: int) -> Optional[pd.DataFrame]:
@@ -44,16 +45,16 @@ def _read_cache(key: str, max_age_minutes: int) -> Optional[pd.DataFrame]:
     if age_min > max_age_minutes:
         return None
     try:
-        return pd.read_parquet(path)
+        return pd.read_pickle(path)
     except Exception:
         return None
 
 
 def _write_cache(key: str, df: pd.DataFrame) -> None:
     try:
-        df.to_parquet(_cache_path(key))
+        df.to_pickle(_cache_path(key))
     except Exception:
-        # parquet engine may be missing; caching is best-effort only
+        # caching is best-effort only; never let it break a fetch
         pass
 
 

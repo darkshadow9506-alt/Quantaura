@@ -178,9 +178,12 @@ git clone <your-fork-url> QuantAura
 cd QuantAura
 python -m venv .venv && source .venv/bin/activate   # optional but recommended
 pip install -r requirements.txt
+# or, for an editable install that adds a `quantaura` command:
+pip install -e .
 ```
 
-Python 3.10+ required.
+Python 3.10+ required. A GitHub Actions workflow (`.github/workflows/ci.yml`)
+runs the test suite and the offline self-test on every push.
 
 ## Configure
 

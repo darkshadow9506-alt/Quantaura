@@ -6,21 +6,26 @@ Commands:
   /signal SYMBOL       — analyse one symbol now (e.g. /signal AAPL,
                          /signal EURUSD=X, /signal BTC/USDT)
   /pairs               — scan the cointegration pairs
+  /factor              — scan the cross-sectional momentum factor
+  /ml [SYMBOL]         — gradient-boosting model signal(s)
   /status              — show the active configuration
 
 Heavy work (network + backtests) runs in a worker thread via
 asyncio.to_thread so the event loop never blocks. If a broadcast chat id
 and the job-queue extra are configured, the bot also pushes a scheduled
 scan automatically.
+
+All Markdown sends fall back to plain text if Telegram rejects the
+entities, so a stray character in a rationale can never break a command.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from functools import partial
 
 from telegram import Update
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -31,7 +36,6 @@ from . import engine
 from .config import Settings
 from .data import asset_class_of
 from .formatting import format_scan_summary, format_signal
-from .models import AssetClass
 
 log = logging.getLogger("quantaura.bot")
 
@@ -39,6 +43,28 @@ _MAX_DETAIL_SIGNALS = 8  # cap how many full cards we push per scan
 
 
 # ---------------------------------------------------------------------
+def _plain(text: str) -> str:
+    return text.replace("*", "").replace("`", "")
+
+
+async def _reply(message, text: str, md: bool = True) -> None:
+    """Reply, preferring Markdown but falling back to plain text on error."""
+    if md:
+        try:
+            await message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+            return
+        except BadRequest:
+            log.warning("Markdown reply rejected; sending plain text.")
+    await message.reply_text(_plain(text))
+
+
+async def _broadcast(bot, chat_id: str, text: str) -> None:
+    try:
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN)
+    except BadRequest:
+        await bot.send_message(chat_id=chat_id, text=_plain(text))
+
+
 def _authorized(settings: Settings, update: Update) -> bool:
     allowed = settings.telegram_allowed_users
     if not allowed:
@@ -73,7 +99,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• `/status` — show configuration\n\n"
         "Examples: `/signal AAPL` · `/signal EURUSD=X` · `/signal BTC/USDT`"
     )
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    await _reply(update.message, text)
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -87,30 +113,27 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Timeframe: `{settings.data.get('timeframe')}`\n"
         f"Universe: {len(uni.get('stocks', []))} stocks, "
         f"{len(uni.get('forex', []))} FX, {len(uni.get('crypto', []))} crypto\n"
-        f"Strategies: trend, macd, dual_thrust, squeeze, mean_reversion, "
-        f"pairs, factor_momentum, ml_gboost\n"
+        "Strategies: `trend, macd, dual_thrust, squeeze, mean_reversion, "
+        "pairs, factor_momentum, ml_gboost`\n"
         f"Trailing stop: {settings.risk.get('use_trailing_stop')} "
         f"({settings.risk.get('trail_atr_mult')}×ATR)\n"
         f"Gate: ≥{g.get('min_backtest_trades')} trades, "
         f"win≥{float(g.get('min_win_rate',0))*100:.0f}%, "
-        f"PF≥{g.get('min_profit_factor')}, Sharpe≥{g.get('min_sharpe')}\n"
+        f"PF≥{g.get('min_profit_factor')}, "
+        f"P(profit)≥{float(g.get('min_prob_profitable',0))*100:.0f}%\n"
         f"Risk: {settings.risk.get('risk_per_trade_pct')}%/trade, "
         f"{settings.risk.get('kelly_fraction')}×Kelly\n"
         f"Account equity: ${settings.account_equity:,.0f}"
     )
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    await _reply(update.message, text)
 
 
 async def _send_signals(update_or_chat, context, signals, header: str | None = None):
     if header:
-        await update_or_chat.reply_text(
-            format_scan_summary(signals) if signals else header,
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        await _reply(update_or_chat,
+                     format_scan_summary(signals) if signals else header)
     for sig in signals[:_MAX_DETAIL_SIGNALS]:
-        await update_or_chat.reply_text(
-            format_signal(sig, md=True), parse_mode=ParseMode.MARKDOWN
-        )
+        await _reply(update_or_chat, format_signal(sig, md=True))
 
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -131,9 +154,7 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     signals = await asyncio.to_thread(
         engine.scan_universe, settings, classes, True
     )
-    await update.message.reply_text(
-        format_scan_summary(signals), parse_mode=ParseMode.MARKDOWN
-    )
+    await _reply(update.message, format_scan_summary(signals))
     await _send_signals(update.message, context, signals)
 
 
@@ -171,9 +192,7 @@ async def cmd_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text("🔎 Scanning cointegration pairs…")
     signals = await asyncio.to_thread(engine.scan_pairs, settings, True)
-    await update.message.reply_text(
-        format_scan_summary(signals), parse_mode=ParseMode.MARKDOWN
-    )
+    await _reply(update.message, format_scan_summary(signals))
     await _send_signals(update.message, context, signals)
 
 
@@ -183,9 +202,7 @@ async def cmd_factor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     await update.message.reply_text("🔎 Scanning the cross-sectional momentum factor…")
     signals = await asyncio.to_thread(engine.scan_factor, settings, True)
-    await update.message.reply_text(
-        format_scan_summary(signals), parse_mode=ParseMode.MARKDOWN
-    )
+    await _reply(update.message, format_scan_summary(signals))
     await _send_signals(update.message, context, signals)
 
 
@@ -201,9 +218,7 @@ async def cmd_ml(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text("🤖 Running the ML model across the universe… (slow)")
         signals = await asyncio.to_thread(engine.scan_ml, settings, True)
-    await update.message.reply_text(
-        format_scan_summary(signals), parse_mode=ParseMode.MARKDOWN
-    )
+    await _reply(update.message, format_scan_summary(signals))
     await _send_signals(update.message, context, signals)
 
 
@@ -215,17 +230,9 @@ async def _scheduled_scan(context: ContextTypes.DEFAULT_TYPE) -> None:
     signals = await asyncio.to_thread(engine.scan_universe, settings, None, True)
     if not signals:
         return
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=format_scan_summary(signals),
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    await _broadcast(context.bot, chat_id, format_scan_summary(signals))
     for sig in signals[:_MAX_DETAIL_SIGNALS]:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=format_signal(sig, md=True),
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        await _broadcast(context.bot, chat_id, format_signal(sig, md=True))
 
 
 # ---------------------------------------------------------------------

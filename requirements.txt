@@ -15,4 +15,3 @@ python-telegram-bot[job-queue]>=21.0  # async bot framework (v21 API) + schedule
 # ---- Config / utilities ----
 PyYAML>=6.0
 python-dotenv>=1.0
-tenacity>=8.2              # retry/backoff for network calls
