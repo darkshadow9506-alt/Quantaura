@@ -100,3 +100,9 @@ class Settings:
     @property
     def signal_gate(self) -> dict[str, Any]:
         return self.section("signal_gate")
+
+    @property
+    def journal_db_path(self) -> str:
+        """DB path: QUANTAURA_DB env overrides config (handy for Docker volumes)."""
+        return (os.getenv("QUANTAURA_DB", "").strip()
+                or str(self.section("journal").get("db_path", "") or ""))

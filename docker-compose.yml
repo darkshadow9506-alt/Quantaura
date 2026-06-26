@@ -1,0 +1,16 @@
+services:
+  quantaura:
+    build: .
+    image: quantaura:latest
+    container_name: quantaura
+    restart: always              # survives crashes and server reboots
+    env_file: .env               # your TELEGRAM_BOT_TOKEN etc.
+    environment:
+      - QUANTAURA_DB=/app/state/quantaura_state.db
+    volumes:
+      - quantaura_state:/app/state        # journal DB persists across updates
+      - quantaura_cache:/app/data_cache   # OHLCV cache persists
+
+volumes:
+  quantaura_state:
+  quantaura_cache:

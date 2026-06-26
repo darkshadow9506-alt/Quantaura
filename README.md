@@ -240,6 +240,22 @@ python -m quantaura optimize AAPL --strategy trend
 python -m quantaura bot
 ```
 
+### Run it 24/7 (always-on)
+
+See **[DEPLOY.md](DEPLOY.md)** for keeping the bot running around the clock.
+Quickest path on a server you already have (e.g. an existing v2ray VPS,
+which is just a Linux box abroad — run it there for free):
+
+```bash
+git clone <your-repo-url> quantaura && cd quantaura
+cp .env.example .env && nano .env      # add your bot token
+sudo bash deploy/install.sh            # installs a systemd service
+```
+
+This auto-restarts on crash and on reboot. A `Dockerfile` +
+`docker-compose.yml` are included as an alternative, plus notes on
+genuinely-free hosts (e.g. Oracle Cloud Free Tier).
+
 ### Telegram commands
 
 | Command | Action |

@@ -370,7 +370,7 @@ def build_application(settings: Settings) -> Application:
     store = None
     jcfg = settings.section("journal")
     if jcfg.get("enabled", True):
-        store = Store(jcfg.get("db_path") or str(DEFAULT_DB))
+        store = Store(settings.journal_db_path or str(DEFAULT_DB))
         log.info("Journal enabled at %s", store.path)
     app.bot_data["store"] = store
 
