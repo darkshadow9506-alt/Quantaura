@@ -152,6 +152,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     settings = Settings.load()
 
+    # route data fetches through a proxy (e.g. a v2ray local SOCKS) if set
+    from . import net
+    net.apply_proxy(settings.proxy_url)
+
     dispatch = {
         "scan": _cmd_scan,
         "signal": _cmd_signal,

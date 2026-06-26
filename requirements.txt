@@ -10,7 +10,8 @@ yfinance>=0.2.40           # stocks, ETFs, FX, indices (free, EOD + intraday)
 ccxt>=4.3                  # crypto exchange OHLCV (Binance, etc.)
 
 # ---- Telegram bot ----
-python-telegram-bot[job-queue]>=21.0  # async bot framework (v21 API) + scheduler
+python-telegram-bot[job-queue,socks]>=21.0  # bot framework + scheduler + SOCKS proxy
+PySocks>=1.7              # SOCKS proxy support for requests-based data fetches
 
 # ---- Config / utilities ----
 PyYAML>=6.0

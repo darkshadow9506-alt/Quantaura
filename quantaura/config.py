@@ -36,6 +36,7 @@ class Settings:
     telegram_broadcast_chat_id: str = ""
     account_equity: float = 10_000.0
     ccxt_exchange: str = "toobit"
+    proxy_url: str = ""          # e.g. socks5://127.0.0.1:10808 (a v2ray local proxy)
 
     # ------------------------------------------------------------------
     @classmethod
@@ -63,6 +64,7 @@ class Settings:
             telegram_broadcast_chat_id=os.getenv("TELEGRAM_BROADCAST_CHAT_ID", "").strip(),
             account_equity=equity,
             ccxt_exchange=os.getenv("CCXT_EXCHANGE", "toobit").strip() or "toobit",
+            proxy_url=os.getenv("PROXY_URL", "").strip(),
         )
 
     # --- convenient typed accessors ----------------------------------

@@ -4,14 +4,23 @@ The bot is a normal long-running Python process. To keep it running around
 the clock you need a machine that's always on with open internet access to
 **api.telegram.org** and your data sources (Yahoo Finance, Toobit).
 
-> **You probably already have a server.** A "v2ray server" *is* a Linux
-> VPS hosted abroad that you already pay for. You can run QuantAura on that
-> same server for **no extra cost** — and because it's outside a censored
-> region, Telegram and the market-data APIs are reachable directly. Run the
-> bot on the **server** (the foreign exit node), not on your home machine.
+# Which situation are you in?
 
-Pick one of the options below. **Option A (systemd) is the recommended,
-easiest "set and forget".**
+There are two very different things people call a "server":
+
+1. **A real VPS** — you have an SSH login and root on a Linux box abroad
+   (DigitalOcean, Hetzner, Oracle Cloud, etc.). You *can* run software on
+   it → use **Option A / B** below. This is the best setup.
+
+2. **Just a v2ray "config" / subscription** — you bought proxy access from
+   a seller. This is **only a tunnel; you do NOT control that server and
+   cannot run the bot on it.** Instead, run the bot on **your own
+   computer** (or a cheap always-on device) and route its traffic through
+   your v2ray config so it can reach Telegram from a censored network →
+   use **Option D (proxy)**. For truly always-on without leaving your PC
+   on, get a **free** real VPS (Oracle Cloud Always-Free) and use Option A.
+
+Pick the matching option below.
 
 ---
 
@@ -80,6 +89,49 @@ python -m quantaura bot
 # detach with: Ctrl-b then d   (the bot keeps running)
 # reattach later: tmux attach -t quantaura
 ```
+
+---
+
+## Option D — run on your own PC through a v2ray config (no VPS)
+
+Use this if all you have is a v2ray **config** (proxy access), not a server
+you control. The bot runs on your computer; its internet traffic goes out
+through your v2ray client, so it can reach Telegram from a censored network.
+
+1. **Run your v2ray client** (v2rayN, Nekoray, Hiddify, v2rayNG…) and import
+   your config so it's connected. The client exposes a **local proxy** —
+   note its SOCKS port (commonly `10808`, sometimes `2080`/`12334`). In
+   v2rayN/Nekoray it's shown under settings as the "local listening" /
+   inbound SOCKS port.
+
+2. **Install and configure the bot:**
+
+   ```bash
+   python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+   cp .env.example .env
+   ```
+
+   Edit `.env` and set your token **and** the proxy:
+
+   ```
+   TELEGRAM_BOT_TOKEN=123456789:ABC...
+   PROXY_URL=socks5://127.0.0.1:10808     # <- your v2ray client's local SOCKS port
+   ```
+
+3. **Run it:**
+
+   ```bash
+   python -m quantaura bot
+   ```
+
+   The bot now reaches Telegram + Yahoo/Toobit through your config. Keep the
+   v2ray client connected and the bot process running.
+
+To keep it always-on on your PC: on Linux/Mac use **Option C (tmux)**; on
+Windows, leave the terminal open or use Task Scheduler. (Your PC must stay
+on. For 24/7 without that, use a free VM — see below — and you won't need
+the proxy at all.)
 
 ---
 

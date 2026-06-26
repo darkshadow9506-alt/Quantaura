@@ -363,7 +363,14 @@ def build_application(settings: Settings) -> Application:
         raise RuntimeError(
             "TELEGRAM_BOT_TOKEN is not set. Copy .env.example to .env and add your token."
         )
-    app = Application.builder().token(settings.telegram_token).build()
+    # route outbound traffic through a proxy (e.g. a local v2ray SOCKS) if set
+    from . import net
+    proxy = net.apply_proxy(settings.proxy_url)
+    builder = Application.builder().token(settings.telegram_token)
+    if proxy:
+        builder = builder.proxy(proxy).get_updates_proxy(proxy)
+        log.info("Using proxy for Telegram: %s", proxy)
+    app = builder.build()
     app.bot_data["settings"] = settings
 
     # local SQLite journal (dedup, live track record, subscribers)
