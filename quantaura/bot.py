@@ -430,8 +430,10 @@ def build_application(settings: Settings) -> Application:
     # scheduled scan: runs if the job-queue extra is installed and there is
     # somewhere to send (a broadcast id or the subscriber journal).
     if app.job_queue is not None and (settings.telegram_broadcast_chat_id or store is not None):
-        app.job_queue.run_repeating(_scheduled_scan, interval=6 * 3600, first=30)
-        log.info("Scheduled scan enabled (every 6h).")
+        hours = float(settings.section("schedule").get("scan_interval_hours", 1) or 1)
+        hours = max(0.1, hours)          # guard against an absurdly small interval
+        app.job_queue.run_repeating(_scheduled_scan, interval=hours * 3600, first=30)
+        log.info("Scheduled scan enabled (every %sh).", hours)
 
     return app
 
