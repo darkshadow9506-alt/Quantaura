@@ -215,7 +215,8 @@ def get_ohlcv(
         return cached
 
     last_err: Optional[Exception] = None
-    for attempt in range(4):
+    attempts = 3
+    for attempt in range(attempts):
         try:
             if asset_class is AssetClass.CRYPTO:
                 df = _fetch_ccxt(symbol, timeframe, lookback, ccxt_exchange)
@@ -229,7 +230,9 @@ def get_ohlcv(
             return df
         except Exception as exc:  # network / parsing
             last_err = exc
-            time.sleep(2 ** attempt)  # 1,2,4,8s backoff
+            # gentle, capped backoff; don't sleep after the final attempt
+            if attempt < attempts - 1:
+                time.sleep(min(1.5 * (attempt + 1), 4.0))   # 1.5s, 3s
     raise DataError(f"failed to fetch {symbol}: {last_err}")
 
 
