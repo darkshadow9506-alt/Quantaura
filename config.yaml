@@ -46,6 +46,19 @@ regime:
   adx_trend_threshold: 25     # ADX >= 25 -> trending; < 20 -> ranging
   adx_range_threshold: 20
 
+# --- Structure-aware targets -----------------------------------------
+# Pull take-profit in to just before a significant swing level (support
+# for shorts, resistance for longs) so the order fills BEFORE price can
+# reverse off that level — instead of a blind R-multiple that might land
+# just beyond a key level. Applies to the momentum/breakout strategies
+# (and is used in the backtest too, so the stats stay consistent).
+structure:
+  enabled: true
+  swing_width: 3          # bars on each side that define a pivot high/low
+  buffer_atr: 0.25        # place the target this far (in ATR) before the level
+  lookback: 120           # only consider pivots within this many bars
+  min_rr: 0.8             # if refining drops reward:risk below this, keep the R-multiple
+
 # --- Strategy: Trend / Time-Series Momentum --------------------------
 # Donchian-channel breakout with a long-term moving-average filter.
 # This is the classic trend-following edge run by CTAs (Man AHL, etc.).

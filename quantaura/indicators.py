@@ -129,6 +129,24 @@ def adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 
 # ---------------------------------------------------------------------
+# Swing pivots (market structure: support / resistance)
+# ---------------------------------------------------------------------
+def swing_pivots(df: pd.DataFrame, width: int = 3):
+    """Fractal swing highs/lows.
+
+    Returns (piv_low, piv_high): Series holding the pivot price at each
+    pivot bar (NaN elsewhere). A pivot at bar i is only *confirmed* `width`
+    bars later, so callers must read pivots only at bars <= t-width to stay
+    look-ahead-free.
+    """
+    low, high = df["low"], df["high"]
+    win = 2 * width + 1
+    is_low = low == low.rolling(win, center=True, min_periods=win).min()
+    is_high = high == high.rolling(win, center=True, min_periods=win).max()
+    return low.where(is_low), high.where(is_high)
+
+
+# ---------------------------------------------------------------------
 # MACD (Moving Average Convergence Divergence)
 # ---------------------------------------------------------------------
 def macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):

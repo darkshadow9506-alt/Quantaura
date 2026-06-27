@@ -112,6 +112,60 @@ def test_squeeze_fires_on_release():
     assert abs(fired.rr_ratio - 3.0) < 1e-6   # squeeze uses a 3R target
 
 
+def test_structure_target_refinement():
+    import numpy as np
+    import pandas as pd
+    from quantaura.strategies import _refine_target
+    n = 130
+    df = pd.DataFrame({"piv_low": [np.nan] * n, "piv_high": [np.nan] * n})
+    scfg = {"enabled": True, "swing_width": 3, "buffer_atr": 0.25,
+            "lookback": 120, "min_rr": 0.8}
+
+    # SHORT: a support at 185 sits between target(180) and entry(200) ->
+    # target pulled up to 185 + 0.25*ATR
+    df.loc[50, "piv_low"] = 185.0
+    t = _refine_target(df, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, scfg)
+    assert abs(t - 186.0) < 1e-9
+
+    # LONG: a resistance at 215 between entry(200) and target(220) ->
+    # target pulled down to 215 - 0.25*ATR
+    df2 = pd.DataFrame({"piv_low": [np.nan] * n, "piv_high": [np.nan] * n})
+    df2.loc[50, "piv_high"] = 215.0
+    t2 = _refine_target(df2, 100, Side.LONG, 200.0, 220.0, 4.0, 10.0, scfg)
+    assert abs(t2 - 214.0) < 1e-9
+
+    # no qualifying level -> mechanical target unchanged
+    assert _refine_target(df, 100, Side.SHORT, 200.0, 190.0, 4.0, 10.0, scfg) == 190.0
+
+    # empty/disabled structure -> unchanged (back-compat)
+    assert _refine_target(df, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, {}) == 180.0
+    assert _refine_target(df, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0,
+                          {"enabled": False}) == 180.0
+
+    # refined reward:risk below min_rr -> keep mechanical
+    df.loc[60, "piv_low"] = 199.0     # support 1 point below entry -> tiny reward
+    df3 = pd.DataFrame({"piv_low": [np.nan] * n, "piv_high": [np.nan] * n})
+    df3.loc[60, "piv_low"] = 199.0
+    assert _refine_target(df3, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, scfg) == 180.0
+
+
+def test_structure_geometry_stays_valid(trending_df):
+    # with structure enabled, any produced plan must still be valid geometry
+    from quantaura.strategies import TrendBreakout
+    s = TrendBreakout(
+        {"donchian_entry": 20, "ma_slow": 200, "atr_period": 14,
+         "atr_stop_mult": 2.5, "min_target_R": 2.0},
+        structure={"enabled": True, "swing_width": 3, "buffer_atr": 0.25,
+                   "lookback": 120, "min_rr": 0.8})
+    prepared = s.prepare(trending_df)
+    for i in range(len(prepared)):
+        p = s.evaluate(prepared, i)
+        if p:
+            assert p.valid()
+            # refined target never exceeds the original 2R distance
+            assert p.rr_ratio <= 2.0 + 1e-9
+
+
 def test_build_strategies_count():
     from quantaura.config import Settings
     from quantaura.strategies import build_strategies

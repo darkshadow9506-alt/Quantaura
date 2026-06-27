@@ -336,6 +336,20 @@ def run_selftest() -> bool:
     ok &= _check("portfolio summary renders",
                  "Portfolio risk" in pf_mod.format_summary(summ, 10000))
 
+    # 13) structure-aware targets ----------------------------------------
+    print("\n[13] Structure-aware targets")
+    from .strategies import _refine_target
+    import pandas as _pd
+    sdf = _pd.DataFrame({"piv_low": [np.nan] * 130, "piv_high": [np.nan] * 130})
+    sdf.loc[50, "piv_low"] = 185.0
+    scfg = {"enabled": True, "swing_width": 3, "buffer_atr": 0.25,
+            "lookback": 120, "min_rr": 0.8}
+    refined = _refine_target(sdf, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, scfg)
+    ok &= _check("target pulled in to just before support (186 vs blind 180)",
+                 abs(refined - 186.0) < 1e-9, f"refined={refined}")
+    unchanged = _refine_target(sdf, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, {})
+    ok &= _check("empty structure keeps mechanical target", unchanged == 180.0)
+
     print("\n" + "=" * 50)
     print("RESULT:", "ALL CHECKS PASSED ✅" if ok else "SOME CHECKS FAILED ❌")
     return ok

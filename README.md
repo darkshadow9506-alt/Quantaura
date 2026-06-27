@@ -145,6 +145,13 @@ scenarios"):
 - **Multi-strategy confluence.** When several independent strategies fire
   the same direction on the same symbol, confidence is boosted — these are
   independent confirmations of the same idea.
+- **Structure-aware targets.** A blind R-multiple target can land just
+  beyond a key level where price reverses (so the order never fills). When
+  a significant swing level (support for shorts, resistance for longs) sits
+  between entry and the mechanical target, the target is pulled in to just
+  *before* it, so it fills before the bounce. The backtest uses the same
+  refined targets, so the published stats stay consistent. (Tunable in
+  `config.yaml → structure`.)
 
 All of these feed a single blended **confidence** score (0–100%) shown on
 every signal. None of them is a guarantee — they are honest probability
@@ -308,7 +315,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 72 unit/integration tests (synthetic data, no network)
+pytest -q            # 77 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 
