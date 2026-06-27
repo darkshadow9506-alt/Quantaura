@@ -96,6 +96,19 @@ def test_level_beyond_target_ignored():
     assert r.recommended_tp == 130.0
 
 
+def test_past_target_take_profit_now():
+    # SHORT already trading below its target -> recommend banking now, not the
+    # (now worse) target price
+    r = manage.review(side=Side.SHORT, entry=220, stop=231, target=198, current=168,
+                      atr=8, ma_trend=210, macd_hist=-1, hi_since=221, lo_since=167, cfg=CFG)
+    assert r.recommended_tp == 168 and r.near_target
+    assert "reached" in r.tp_reason
+    # LONG already above target
+    r2 = manage.review(side=Side.LONG, entry=100, stop=90, target=120, current=125,
+                       atr=2, ma_trend=110, macd_hist=1, hi_since=126, lo_since=99, cfg=CFG)
+    assert r2.recommended_tp == 125
+
+
 def test_zero_risk_safe():
     r = manage.review(side=Side.LONG, entry=100, stop=100, target=120, current=110,
                       atr=2.0, ma_trend=99, macd_hist=1.0, hi_since=111, lo_since=99, cfg=CFG)

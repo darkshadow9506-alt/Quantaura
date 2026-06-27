@@ -73,9 +73,12 @@ def review(*, side: Side, entry: float, stop: float, target: float, current: flo
         notes.append(f"In profit ({R_now:+.2f}R) — take partial profit and move stop to "
                      + ("breakeven." if not trailed else f"the trail at {rec:.4f}."))
 
-    # near target?
-    near = abs(target - current) <= near_mult * atr
-    if near:
+    # already reached / passed the target, or within reach of it?
+    past_target = (long and current >= target) or ((not long) and current <= target)
+    near = past_target or abs(target - current) <= near_mult * atr
+    if past_target:
+        notes.append("🎯 Target reached — take profit now.")
+    elif near:
         notes.append("Within reach of target — consider taking profit / tightening.")
 
     # danger: trend or momentum flipped against the position
@@ -92,7 +95,9 @@ def review(*, side: Side, entry: float, stop: float, target: float, current: flo
     # --- live take-profit recommendation (adapts to the current state) ---
     tp_buf = float(cfg.get("tp_buffer_atr", 0.25)) * atr
     rec_tp, tp_reason = target, "let it run toward the target"
-    if danger:
+    if past_target:
+        rec_tp, tp_reason = current, "target reached — take profit now"
+    elif danger:
         rec_tp, tp_reason = current, "thesis weakening — take profit / close now"
     elif near:
         rec_tp, tp_reason = target, "in the target zone — take profit"
