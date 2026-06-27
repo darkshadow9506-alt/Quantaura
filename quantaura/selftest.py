@@ -393,6 +393,11 @@ def run_selftest() -> bool:
                              atr=2.0, ma_trend=98, macd_hist=0.4, hi_since=104, lo_since=99,
                              cfg=mcfg)
     ok &= _check("quiet hold is not actionable", not rev3.actionable)
+    rev4 = manage_mod.review(side=Side.LONG, entry=100, stop=90, target=140, current=112,
+                             atr=2.0, ma_trend=105, macd_hist=0.5, hi_since=113, lo_since=99,
+                             cfg=mcfg, next_level=118.0)
+    ok &= _check("live TP banks before a level ahead (117.5 not 140)",
+                 abs(rev4.recommended_tp - 117.5) < 1e-9, f"tp={rev4.recommended_tp}")
 
     print("\n" + "=" * 50)
     print("RESULT:", "ALL CHECKS PASSED ✅" if ok else "SOME CHECKS FAILED ❌")

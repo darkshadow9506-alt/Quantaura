@@ -64,6 +64,38 @@ def test_near_target_flag():
     assert r.near_target
 
 
+def test_live_tp_banks_before_level_ahead():
+    # long in profit; a resistance at 118 sits before the 130 target ->
+    # recommend taking profit just before it
+    r = manage.review(side=Side.LONG, entry=100, stop=90, target=130, current=112,
+                      atr=2.0, ma_trend=105, macd_hist=0.5, hi_since=113, lo_since=99,
+                      cfg=CFG, next_level=118.0)
+    assert abs(r.recommended_tp - (118.0 - 0.25 * 2.0)) < 1e-9   # 117.5
+    assert "resistance" in r.tp_reason
+
+
+def test_live_tp_rides_to_target_when_clear():
+    r = manage.review(side=Side.LONG, entry=100, stop=90, target=130, current=112,
+                      atr=2.0, ma_trend=105, macd_hist=0.5, hi_since=113, lo_since=99,
+                      cfg=CFG, next_level=None)
+    assert r.recommended_tp == 130.0
+
+
+def test_live_tp_take_now_on_danger():
+    r = manage.review(side=Side.LONG, entry=100, stop=90, target=130, current=104,
+                      atr=2.0, ma_trend=106, macd_hist=-0.3, hi_since=108, lo_since=99,
+                      cfg=CFG, next_level=120.0)
+    assert r.danger and r.recommended_tp == 104   # take profit / close at current
+
+
+def test_level_beyond_target_ignored():
+    # resistance at 140 is beyond the 130 target -> ride to target
+    r = manage.review(side=Side.LONG, entry=100, stop=90, target=130, current=112,
+                      atr=2.0, ma_trend=105, macd_hist=0.5, hi_since=113, lo_since=99,
+                      cfg=CFG, next_level=140.0)
+    assert r.recommended_tp == 130.0
+
+
 def test_zero_risk_safe():
     r = manage.review(side=Side.LONG, entry=100, stop=100, target=120, current=110,
                       atr=2.0, ma_trend=99, macd_hist=1.0, hi_since=111, lo_since=99, cfg=CFG)

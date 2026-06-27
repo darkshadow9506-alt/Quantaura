@@ -120,8 +120,9 @@ def format_management(row: dict, rev) -> str:
         head += "  " + " · ".join(flags)
     lines = [head,
              f"Entry {_fmt_price(float(row['entry']))} | "
-             f"Stop {_fmt_price(float(row['stop']))} → *recommended {_fmt_price(rev.recommended_sl)}* | "
-             f"Target {_fmt_price(float(row['target']))}"]
+             f"SL → *{_fmt_price(rev.recommended_sl)}* | "
+             f"💰 Take profit → *{_fmt_price(rev.recommended_tp)}* | "
+             f"final target {_fmt_price(float(row['target']))}"]
     for n in rev.notes:
         lines.append(f"• {n}")
     return "\n".join(lines)

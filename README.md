@@ -312,12 +312,19 @@ the bot three live-trading qualities:
   (every 6h), which first updates the journal, then broadcasts only the
   *new* gated signals plus the portfolio summary to all subscribers.
 - **Active management.** `/manage` reviews every open position and tells you
-  what to do *now*: at +1R take partial profit and move the stop to
-  breakeven; once running, a concrete **trailed stop** price; a "near
-  target" flag; and a **🚨 danger** alert to close/tighten when the thesis
-  breaks (price back across the 200-MA or MACD flipping against you). The
-  scheduled job also pushes danger alerts unprompted. It's advice only — the
-  bot never places or closes orders; you act on Toobit yourself.
+  what to do *now*, based on the live state:
+  - a **live take-profit price** — if a support/resistance level lies ahead
+    before the target, it recommends banking profit just before it; if the
+    path is clear, it says ride to target; if the thesis is breaking, take
+    profit / close now;
+  - at +1R, take partial profit and move the stop to breakeven;
+  - once running, a concrete **trailed stop** price;
+  - a **🚨 danger** alert to close/tighten when the thesis breaks (price back
+    across the 200-MA or MACD flipping against you).
+
+  The scheduled job (every `schedule.scan_interval_hours`, default 1h) also
+  pushes danger alerts unprompted. It's advice only — the bot never places or
+  closes orders; you act on Toobit yourself.
 
 ## Data sources
 
@@ -335,7 +342,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 95 unit/integration tests (synthetic data, no network)
+pytest -q            # 99 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 

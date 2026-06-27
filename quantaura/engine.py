@@ -474,12 +474,37 @@ def review_positions(settings: Settings, store) -> list:
             side = Side(row["side"])
         except ValueError:
             continue
+
+        # nearest structural level ahead of price in the trade's direction
+        next_level = _next_level_ahead(df, side, current, settings.section("structure"))
+
         rev = manage_mod.review(
             side=side, entry=float(row["entry"]), stop=float(row["stop"]),
             target=float(row["target"]), current=current, atr=atr_v,
-            ma_trend=ma_trend, macd_hist=macd_hist, hi_since=hi, lo_since=lo, cfg=mcfg)
+            ma_trend=ma_trend, macd_hist=macd_hist, hi_since=hi, lo_since=lo, cfg=mcfg,
+            next_level=next_level)
         out.append((row, rev))
     return out
+
+
+def _next_level_ahead(df, side: Side, current: float, scfg: dict):
+    """Nearest support/resistance ahead of price in the trade direction."""
+    from . import smc
+
+    sw = int(scfg.get("swing_width", 3))
+    lb = int(scfg.get("lookback", 120))
+    sdf = df.copy()
+    smc.add_levels(sdf, sw)
+    n = len(sdf)
+    hi = n - 1 - sw
+    lo = max(0, n - 1 - lb)
+    if hi <= lo:
+        return None
+    if side is Side.LONG:
+        lv = [v for v in smc.collect_levels(sdf, lo, hi, smc.RES_COLS) if v > current]
+        return min(lv) if lv else None
+    lv = [v for v in smc.collect_levels(sdf, lo, hi, smc.SUP_COLS) if v < current]
+    return max(lv) if lv else None
 
 
 # ---------------------------------------------------------------------

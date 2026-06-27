@@ -210,6 +210,7 @@ manage:
   breakeven_R: 1.0        # at +1R: take partial profit and move stop to breakeven
   trail_atr_mult: 3.0     # then trail the stop at (extreme -/+ this x ATR)
   near_target_atr: 0.5    # flag "near target" within this many ATR of the TP
+  tp_buffer_atr: 0.25     # take profit this far (in ATR) before a level ahead
   danger_on_ma_break: true   # warn if price closes back across the 200-MA
   danger_on_macd_flip: true  # warn if MACD momentum flips against the position
 

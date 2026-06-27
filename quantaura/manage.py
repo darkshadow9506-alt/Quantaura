@@ -20,6 +20,8 @@ from .models import Side
 class ManagementReview:
     R_now: float = 0.0
     recommended_sl: float = 0.0
+    recommended_tp: float = 0.0       # where to take profit given the live state
+    tp_reason: str = ""
     at_breakeven: bool = False
     trailed: bool = False
     near_target: bool = False
@@ -34,10 +36,11 @@ class ManagementReview:
 
 def review(*, side: Side, entry: float, stop: float, target: float, current: float,
            atr: float, ma_trend: float, macd_hist: float,
-           hi_since: float, lo_since: float, cfg: dict) -> ManagementReview:
+           hi_since: float, lo_since: float, cfg: dict,
+           next_level: float | None = None) -> ManagementReview:
     risk = abs(entry - stop)
     if risk <= 0 or atr <= 0:
-        return ManagementReview(recommended_sl=stop)
+        return ManagementReview(recommended_sl=stop, recommended_tp=target)
     be_R = float(cfg.get("breakeven_R", 1.0))
     trail_mult = float(cfg.get("trail_atr_mult", 3.0))
     near_mult = float(cfg.get("near_target_atr", 0.5))
@@ -86,9 +89,28 @@ def review(*, side: Side, entry: float, stop: float, target: float, current: flo
         notes.append("⚠️ Price above trend MA / MACD turned up — short thesis weakening; "
                      "consider closing or tightening the stop.")
 
-    if not notes:
-        notes.append(f"Holding ({R_now:+.2f}R). No action — let it work toward target/stop.")
+    # --- live take-profit recommendation (adapts to the current state) ---
+    tp_buf = float(cfg.get("tp_buffer_atr", 0.25)) * atr
+    rec_tp, tp_reason = target, "let it run toward the target"
+    if danger:
+        rec_tp, tp_reason = current, "thesis weakening — take profit / close now"
+    elif near:
+        rec_tp, tp_reason = target, "in the target zone — take profit"
+    elif next_level is not None:
+        if long and current < next_level < target:
+            c = next_level - tp_buf
+            if c > current:
+                rec_tp, tp_reason = c, f"resistance ~{next_level:.4f} ahead — bank profit before a bounce"
+        elif (not long) and target < next_level < current:
+            c = next_level + tp_buf
+            if c < current:
+                rec_tp, tp_reason = c, f"support ~{next_level:.4f} ahead — bank profit before a bounce"
+    notes.append(f"Take profit ~{rec_tp:.4f} — {tp_reason}.")
+
+    if not [n for n in notes if not n.startswith("Take profit")]:
+        notes.insert(0, f"Holding ({R_now:+.2f}R). Let it work toward target/stop.")
 
     return ManagementReview(R_now=round(R_now, 2), recommended_sl=round(rec, 6),
+                            recommended_tp=round(rec_tp, 6), tp_reason=tp_reason,
                             at_breakeven=at_be, trailed=trailed, near_target=near,
                             danger=danger, notes=notes)
