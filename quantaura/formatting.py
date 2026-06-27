@@ -47,11 +47,29 @@ def format_signal(sig: Signal, md: bool = True) -> str:
         )
         lines.append("")
 
-    if sig.position_units > 0:
+    # explicit, precise execution plan
+    lines.append("📋 *Plan — exact*")
+    if sig.equity_pct > 0:
         lines.append(
-            f"📐 Size: {_fmt_price(sig.position_units)} units "
+            f"• Enter *{sig.equity_pct:.1f}% of wallet* (~${sig.position_notional:,.0f}, "
+            f"{_fmt_price(sig.position_units)} units) — risking {sig.risk_pct:.1f}% "
+            f"(${sig.risk_amount:,.0f})"
+        )
+    elif sig.position_units > 0:
+        lines.append(
+            f"• Size: {_fmt_price(sig.position_units)} units "
             f"(~${sig.position_notional:,.0f}) | risk ${sig.risk_amount:,.0f}"
         )
+    lines.append(f"• Enter at: `{_fmt_price(sig.entry)}`   Stop: `{_fmt_price(sig.stop)}`")
+    if sig.risk_free_at:
+        lines.append(
+            f"• Risk-free at `{_fmt_price(sig.risk_free_at)}` (+1R): take ~half profit "
+            f"& move stop to entry `{_fmt_price(sig.entry)}`"
+        )
+    lines.append(
+        f"• Take profit: `{_fmt_price(sig.risk_free_at)}` (partial) → "
+        f"`{_fmt_price(sig.target)}` (final)"
+    )
     lines.append(
         f"📊 Backtest: {bt.trades} trades | win {bt.win_rate*100:.0f}% | "
         f"PF {bt.profit_factor:.2f} | exp {bt.expectancy_R:+.2f}R | "

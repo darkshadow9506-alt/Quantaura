@@ -190,6 +190,8 @@ def run_selftest() -> bool:
     ok &= _check("formatting non-empty", len(txt) > 50)
     ok &= _check("formatting has entry/stop/target",
                  all(k in txt for k in ("Entry", "Stop", "Target")))
+    ok &= _check("card shows the exact plan (wallet % + risk-free level)",
+                 "Plan" in txt and "Risk-free" in txt and "wallet" in txt)
 
     # 8) new momentum/breakout strategies --------------------------------
     print("\n[8] MACD / Dual Thrust / Squeeze")

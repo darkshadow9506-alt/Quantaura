@@ -110,6 +110,21 @@ def _confidence(stats: BacktestStats, oos: BacktestStats, mc: MonteCarloStats,
     )
 
 
+def _attach_plan(sig: Signal, settings: Settings) -> Signal:
+    """Fill the explicit-plan fields: wallet %, risk %, risk-free (+1R) price."""
+    eq = float(settings.account_equity or 0.0)
+    if eq > 0:
+        sig.equity_pct = round(sig.position_notional / eq * 100.0, 2)
+        sig.risk_pct = round(sig.risk_amount / eq * 100.0, 2)
+    be_R = float(settings.section("manage").get("breakeven_R", 1.0))
+    one_R = sig.risk_per_unit
+    if sig.side is Side.LONG:
+        sig.risk_free_at = round(sig.entry + be_R * one_R, 6)
+    else:
+        sig.risk_free_at = round(sig.entry - be_R * one_R, 6)
+    return sig
+
+
 def _sized(settings: Settings, entry: float, risk_per_unit: float, stats: BacktestStats):
     risk_cfg = settings.risk
     b = _kelly_b(stats.win_rate, stats.profit_factor)
@@ -139,7 +154,7 @@ def _build_signal(
     oos, mc = _assess(plan.side, plan.entry, plan.stop, plan.target, plan.atr,
                       stats, drift, gate)
     sizing = _sized(settings, plan.entry, plan.risk_per_unit, stats)
-    return Signal(
+    sig = Signal(
         symbol=symbol,
         asset_class=asset_class,
         strategy=strategy_name,
@@ -165,6 +180,7 @@ def _build_signal(
         timeframe=settings.data.get("timeframe", "1d"),
         price_at_signal=round(plan.entry, 6),
     )
+    return _attach_plan(sig, settings)
 
 
 # ---------------------------------------------------------------------
@@ -309,7 +325,7 @@ def scan_pairs(settings: Settings, publish_only: bool = True) -> list[PairSignal
 
         sizing = _sized(settings, plan.entry_a, plan.risk_per_unit, stats)
         leg_b_side = Side.SHORT if plan.side_a is Side.LONG else Side.LONG
-        out.append(
+        out.append(_attach_plan(
             PairSignal(
                 symbol=plan.symbol_a,
                 asset_class=AssetClass.STOCK,
@@ -338,8 +354,7 @@ def scan_pairs(settings: Settings, publish_only: bool = True) -> list[PairSignal
                 hedge_ratio=round(plan.hedge_ratio, 6),
                 spread_z=round(plan.spread_z, 3),
                 leg_b_side=leg_b_side.value,
-            )
-        )
+            ), settings))
     return out
 
 
@@ -396,7 +411,7 @@ def scan_factor(settings: Settings, publish_only: bool = True) -> list[Signal]:
             )
             rr = (abs(leg.target - leg.entry) / leg.risk_per_unit
                   if leg.risk_per_unit > 0 else 0.0)
-            out.append(Signal(
+            out.append(_attach_plan(Signal(
                 symbol=leg.symbol, asset_class=ac, strategy="factor_momentum",
                 side=leg.side, entry=round(leg.entry, 6), stop=round(leg.stop, 6),
                 target=round(leg.target, 6), risk_per_unit=round(leg.risk_per_unit, 6),
@@ -411,7 +426,7 @@ def scan_factor(settings: Settings, publish_only: bool = True) -> list[Signal]:
                 backtest=stats, oos=oos, montecarlo=mc,
                 confidence=_confidence(stats, oos, mc), passed_gate=passed,
                 timeframe=d.get("timeframe", "1d"), price_at_signal=round(leg.entry, 6),
-            ))
+            ), settings))
     return out
 
 

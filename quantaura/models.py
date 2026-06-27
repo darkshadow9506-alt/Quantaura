@@ -82,6 +82,9 @@ class Signal:
     position_units: float = 0.0
     position_notional: float = 0.0
     risk_amount: float = 0.0      # account currency risked if stop hit
+    equity_pct: float = 0.0       # position notional as % of wallet
+    risk_pct: float = 0.0         # risk_amount as % of wallet
+    risk_free_at: float = 0.0     # price to move SL to entry + take partial profit (+1R)
 
     # context
     atr: float = 0.0

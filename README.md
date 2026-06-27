@@ -288,10 +288,13 @@ genuinely-free hosts (e.g. Oracle Cloud Free Tier).
 | `/manage` | what to do now with each open position |
 | `/status` | show the active configuration |
 
-A signal card shows side, entry/stop/target, R:R, ATR, suggested size and
-dollar risk, the originating strategy's backtest record, the out-of-sample
-record, the Monte Carlo win-probability / probability-of-profit / risk-of-
-ruin, any multi-strategy confluence, and a blended confidence bar.
+A signal card shows side, entry/stop/target, R:R, ATR, an **exact
+execution plan** (what % of the wallet to enter with, the precise risk-free
+/ +1R level where you take partial profit and move the stop to entry, and
+the partial → final take-profit prices), the originating strategy's
+backtest and out-of-sample record, the Monte Carlo win-probability /
+probability-of-profit / risk-of-ruin, any multi-strategy confluence, and a
+blended confidence bar.
 
 ### Live tracking, deduplication & subscriptions
 

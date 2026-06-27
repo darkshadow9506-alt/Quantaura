@@ -53,6 +53,14 @@ def test_scan_symbol_orchestration(monkeypatch, settings):
         assert 0.0 <= s.montecarlo.prob_profitable <= 1.0
         assert 0.0 <= s.montecarlo.risk_of_ruin <= 1.0
         assert s.confluence >= 1
+        # explicit plan fields
+        assert s.equity_pct >= 0 and s.risk_pct >= 0
+        # risk-free (+1R) sits one R beyond entry in the trade's direction
+        one_R = s.risk_per_unit
+        if s.side is Side.LONG:
+            assert abs(s.risk_free_at - (s.entry + one_R)) < 1e-3
+        else:
+            assert abs(s.risk_free_at - (s.entry - one_R)) < 1e-3
 
 
 def test_scan_symbol_robust_to_bad_data(monkeypatch, settings):
