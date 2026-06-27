@@ -86,6 +86,29 @@ def format_signal(sig: Signal, md: bool = True) -> str:
     return text
 
 
+def format_management(row: dict, rev) -> str:
+    """Render a management review for one open position."""
+    side = row.get("side", "")
+    icon = "🟢" if side == "LONG" else "🔴"
+    flags = []
+    if rev.danger:
+        flags.append("🚨 DANGER")
+    if rev.near_target:
+        flags.append("🎯 near target")
+    if rev.at_breakeven or rev.trailed:
+        flags.append("🔒 risk-free")
+    head = f"{icon} *{row.get('symbol','')}* `{row.get('strategy','')}`  ({rev.R_now:+.2f}R)"
+    if flags:
+        head += "  " + " · ".join(flags)
+    lines = [head,
+             f"Entry {_fmt_price(float(row['entry']))} | "
+             f"Stop {_fmt_price(float(row['stop']))} → *recommended {_fmt_price(rev.recommended_sl)}* | "
+             f"Target {_fmt_price(float(row['target']))}"]
+    for n in rev.notes:
+        lines.append(f"• {n}")
+    return "\n".join(lines)
+
+
 def format_scan_summary(signals: list[Signal]) -> str:
     if not signals:
         return ("No signals passed the backtest gate this scan. "

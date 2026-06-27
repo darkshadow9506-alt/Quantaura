@@ -416,6 +416,58 @@ def scan_factor(settings: Settings, publish_only: bool = True) -> list[Signal]:
 
 
 # ---------------------------------------------------------------------
+def review_positions(settings: Settings, store) -> list:
+    """For each OPEN journaled signal, compute live management advice.
+
+    Returns list of (signal_row_dict, ManagementReview).
+    """
+    from datetime import datetime
+
+    from . import journal as journal_mod
+    from . import manage as manage_mod
+    from .indicators import macd as _macd
+    from .indicators import sma as _sma
+
+    d = settings.data
+    mcfg = settings.section("manage")
+    out = []
+    for row in store.open_signals():
+        try:
+            ac = AssetClass(row["asset_class"])
+            created = datetime.fromisoformat(row["created_at"])
+        except (ValueError, KeyError):
+            continue
+        try:
+            df = data_mod.get_ohlcv(
+                row["symbol"], ac, timeframe=d.get("timeframe", "1d"),
+                lookback=int(d.get("lookback_bars", 1250)),
+                cache_minutes=int(d.get("cache_minutes", 30)),
+                ccxt_exchange=settings.ccxt_exchange)
+        except Exception:
+            continue
+        if df is None or len(df) < 60:
+            continue
+        atr_v = float(atr_ind(df, 14).iloc[-1])
+        ma_trend = float(_sma(df["close"], 200).iloc[-1])
+        _, _, hist = _macd(df["close"])
+        macd_hist = float(hist.iloc[-1])
+        current = float(df["close"].iloc[-1])
+        after = journal_mod.bars_after(df, created)
+        hi = float(after["high"].max()) if not after.empty else float(df["high"].iloc[-1])
+        lo = float(after["low"].min()) if not after.empty else float(df["low"].iloc[-1])
+        try:
+            side = Side(row["side"])
+        except ValueError:
+            continue
+        rev = manage_mod.review(
+            side=side, entry=float(row["entry"]), stop=float(row["stop"]),
+            target=float(row["target"]), current=current, atr=atr_v,
+            ma_trend=ma_trend, macd_hist=macd_hist, hi_since=hi, lo_since=lo, cfg=mcfg)
+        out.append((row, rev))
+    return out
+
+
+# ---------------------------------------------------------------------
 def scan_ml_symbol(
     symbol: str, asset_class: AssetClass, settings: Settings, publish_only: bool = True
 ) -> list[Signal]:

@@ -102,6 +102,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• `/subscribe` · `/unsubscribe` — scheduled scans in this chat\n"
         "• `/performance` — live track record of published signals\n"
         "• `/track` — resolve open signals against the latest prices\n"
+        "• `/manage` — what to do now with each open position\n"
         "• `/status` — show configuration\n\n"
         "Examples: `/signal AAPL` · `/signal EURUSD=X` · `/signal BTC/USDT`"
     )
@@ -317,28 +318,60 @@ async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update.message, journal_mod.format_performance(store.performance()))
 
 
+def _recipients(settings: Settings, store) -> set:
+    r: set[str] = set()
+    if settings.telegram_broadcast_chat_id:
+        r.add(settings.telegram_broadcast_chat_id)
+    if store is not None:
+        r |= {str(c) for c in store.subscribers()}
+    return r
+
+
+async def cmd_manage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if not await _guard(settings, update):
+        return
+    store: Store | None = context.application.bot_data.get("store")
+    if store is None:
+        await update.message.reply_text("Journaling is disabled.")
+        return
+    await update.message.reply_text("⏱ Reviewing open positions…")
+    max_hold = int(settings.section("journal").get("max_hold_days", 30))
+    await asyncio.to_thread(journal_mod.update_open_signals, store, settings, max_hold)
+    reviews = await asyncio.to_thread(engine.review_positions, settings, store)
+    if not reviews:
+        await update.message.reply_text("No open positions to manage.")
+        return
+    from .formatting import format_management
+    for row, rev in reviews:
+        await _reply(update.message, format_management(row, rev))
+
+
 async def _scheduled_scan(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
     store: Store | None = context.application.bot_data.get("store")
+    recipients = _recipients(settings, store)
 
-    # 1) resolve open signals against fresh prices before scanning
+    # 1) resolve open signals, then push DANGER management alerts
     if store is not None:
         try:
             max_hold = int(settings.section("journal").get("max_hold_days", 30))
             await asyncio.to_thread(journal_mod.update_open_signals, store, settings, max_hold)
+            reviews = await asyncio.to_thread(engine.review_positions, settings, store)
+            from .formatting import format_management
+            for row, rev in reviews:
+                if rev.danger and recipients:
+                    for chat_id in recipients:
+                        await _broadcast(context.bot, chat_id, format_management(row, rev))
         except Exception:
-            log.warning("journal update failed", exc_info=True)
+            log.warning("journal/manage update failed", exc_info=True)
 
     # 2) scan, record new (dedup), broadcast to env id + all subscribers
     signals = await asyncio.to_thread(engine.scan_universe, settings, None, True)
     new, _ = _record_new(context, signals) if store is not None else (signals, 0)
     if not new:
         return
-    recipients: set[str] = set()
-    if settings.telegram_broadcast_chat_id:
-        recipients.add(settings.telegram_broadcast_chat_id)
-    if store is not None:
-        recipients |= {str(c) for c in store.subscribers()}
+    recipients = _recipients(settings, store)
     if not recipients:
         return
 
@@ -392,6 +425,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("unsubscribe", cmd_unsubscribe))
     app.add_handler(CommandHandler("performance", cmd_performance))
     app.add_handler(CommandHandler("track", cmd_track))
+    app.add_handler(CommandHandler("manage", cmd_manage))
 
     # scheduled scan: runs if the job-queue extra is installed and there is
     # somewhere to send (a broadcast id or the subscriber journal).

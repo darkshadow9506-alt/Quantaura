@@ -42,6 +42,19 @@ def resolve_path(side: str, entry: float, stop: float, target: float,
     return None, None
 
 
+def bars_after(df, created):
+    """Rows of df strictly after `created` (handles tz-aware/naive indices)."""
+    import pandas as pd
+
+    created_pd = pd.Timestamp(created)
+    if df.index.tz is not None:
+        cmp = (created_pd.tz_convert(df.index.tz) if created_pd.tz is not None
+               else created_pd.tz_localize(df.index.tz))
+    else:
+        cmp = created_pd.tz_localize(None) if created_pd.tz is not None else created_pd
+    return df[df.index > cmp]
+
+
 def _mark_to_market_R(side: str, entry: float, stop: float, last_close: float) -> float:
     risk = abs(entry - stop)
     if risk <= 0:
@@ -80,17 +93,7 @@ def update_open_signals(store, settings, max_hold_days: int = 30) -> dict:
         if df is None or df.empty:
             continue
 
-        # bars strictly after the signal's timestamp (handle tz-aware crypto
-        # indices and tz-naive equity/FX indices uniformly)
-        import pandas as pd
-
-        created_pd = pd.Timestamp(created)
-        if df.index.tz is not None:
-            cmp = (created_pd.tz_convert(df.index.tz) if created_pd.tz is not None
-                   else created_pd.tz_localize(df.index.tz))
-        else:
-            cmp = created_pd.tz_localize(None) if created_pd.tz is not None else created_pd
-        after = df[df.index > cmp]
+        after = bars_after(df, created)     # bars strictly after the signal
         if after.empty:
             continue
 

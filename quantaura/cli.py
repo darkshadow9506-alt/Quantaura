@@ -110,6 +110,24 @@ def _cmd_optimize(args, settings: Settings) -> int:
     return 0
 
 
+def _cmd_manage(args, settings: Settings) -> int:
+    from . import engine, journal
+    from .formatting import format_management
+    from .storage import DEFAULT_DB, Store
+
+    store = Store(settings.journal_db_path or str(DEFAULT_DB))
+    journal.update_open_signals(
+        store, settings, int(settings.section("journal").get("max_hold_days", 30)))
+    reviews = engine.review_positions(settings, store)
+    if not reviews:
+        print("No open positions to manage.")
+        return 0
+    for row, rev in reviews:
+        print(format_management(row, rev).replace("*", "").replace("`", ""))
+        print("-" * 60)
+    return 0
+
+
 def _cmd_bot(args, settings: Settings) -> int:
     from .bot import run
 
@@ -146,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     p_opt.add_argument("--strategy", default="trend",
                        choices=["trend", "mean_reversion", "macd", "dual_thrust", "squeeze"])
 
+    sub.add_parser("manage", help="management advice for open journaled positions")
     sub.add_parser("bot", help="run the Telegram bot")
     sub.add_parser("selftest", help="offline self-check (no network)")
 
@@ -163,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         "factor": _cmd_factor,
         "ml": _cmd_ml,
         "optimize": _cmd_optimize,
+        "manage": _cmd_manage,
         "bot": _cmd_bot,
         "selftest": _cmd_selftest,
     }

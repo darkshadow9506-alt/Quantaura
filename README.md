@@ -285,6 +285,7 @@ genuinely-free hosts (e.g. Oracle Cloud Free Tier).
 | `/subscribe`, `/unsubscribe` | receive scheduled scans in this chat |
 | `/performance` | live track record of all published signals |
 | `/track` | resolve open signals against the latest prices |
+| `/manage` | what to do now with each open position |
 | `/status` | show the active configuration |
 
 A signal card shows side, entry/stop/target, R:R, ATR, suggested size and
@@ -307,6 +308,13 @@ the bot three live-trading qualities:
 - **Subscriptions.** `/subscribe` registers a chat for the scheduled scan
   (every 6h), which first updates the journal, then broadcasts only the
   *new* gated signals plus the portfolio summary to all subscribers.
+- **Active management.** `/manage` reviews every open position and tells you
+  what to do *now*: at +1R take partial profit and move the stop to
+  breakeven; once running, a concrete **trailed stop** price; a "near
+  target" flag; and a **🚨 danger** alert to close/tighten when the thesis
+  breaks (price back across the 200-MA or MACD flipping against you). The
+  scheduled job also pushes danger alerts unprompted. It's advice only — the
+  bot never places or closes orders; you act on Toobit yourself.
 
 ## Data sources
 
@@ -324,7 +332,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 87 unit/integration tests (synthetic data, no network)
+pytest -q            # 95 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 
@@ -347,6 +355,7 @@ quantaura/
   portfolio.py     batch risk: total risk-at-stop, exposure, concentration
   storage.py       SQLite persistence (signals + subscribers), dedup
   journal.py       resolve open signals to TP/SL, live track record
+  manage.py        active management advice for open positions
   risk.py          fixed-fractional + fractional-Kelly sizing
   backtest.py      event-driven, look-ahead-free backtester + R-metrics
   engine.py        orchestration: data -> signal, with the backtest gate

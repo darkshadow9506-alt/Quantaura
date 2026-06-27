@@ -372,6 +372,26 @@ def run_selftest() -> bool:
     ok &= _check("stop placed just beyond resistance (211 not blind 210)",
                  abs(sstop - 211.0) < 1e-9, f"stop={sstop}")
 
+    # 15) active trade management ----------------------------------------
+    print("\n[15] Active trade management")
+    from . import manage as manage_mod
+    mcfg = {"breakeven_R": 1.0, "trail_atr_mult": 3.0, "near_target_atr": 0.5,
+            "danger_on_ma_break": True, "danger_on_macd_flip": True}
+    rev = manage_mod.review(side=Side.LONG, entry=100, stop=90, target=140, current=128,
+                            atr=2.0, ma_trend=110, macd_hist=1.0, hi_since=130, lo_since=99,
+                            cfg=mcfg)
+    ok &= _check("in-profit long trails stop above breakeven",
+                 rev.trailed and abs(rev.recommended_sl - 124.0) < 1e-9,
+                 f"sl={rev.recommended_sl}")
+    rev2 = manage_mod.review(side=Side.LONG, entry=100, stop=90, target=120, current=96,
+                             atr=2.0, ma_trend=99, macd_hist=-0.2, hi_since=108, lo_since=95,
+                             cfg=mcfg)
+    ok &= _check("long flags danger when price breaks trend MA", rev2.danger)
+    rev3 = manage_mod.review(side=Side.LONG, entry=100, stop=90, target=140, current=103,
+                             atr=2.0, ma_trend=98, macd_hist=0.4, hi_since=104, lo_since=99,
+                             cfg=mcfg)
+    ok &= _check("quiet hold is not actionable", not rev3.actionable)
+
     print("\n" + "=" * 50)
     print("RESULT:", "ALL CHECKS PASSED ✅" if ok else "SOME CHECKS FAILED ❌")
     return ok
