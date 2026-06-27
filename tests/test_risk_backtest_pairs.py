@@ -73,3 +73,29 @@ def test_non_cointegrated_pair_rejected():
     plan = pairs_mod.evaluate_pair("A", "B", a, b, cfg)
     # independent random walks are essentially never cointegrated at p<=0.01
     assert plan is None
+
+
+def test_coint_fallback_without_statsmodels(monkeypatch):
+    """A missing statsmodels must not break pairs: numpy ADF takes over."""
+    import builtins
+    real_import = builtins.__import__
+
+    def _no_statsmodels(name, *a, **k):
+        if name.startswith("statsmodels"):
+            raise ImportError("statsmodels hidden for test")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _no_statsmodels)
+    a, b = _coint_pair()
+    rng = np.random.default_rng(7)
+    a2 = pd.Series(100 + np.cumsum(rng.normal(0, 1, 400)))
+    b2 = pd.Series(100 + np.cumsum(rng.normal(0, 1, 400)))  # independent
+
+    p_coint = pairs_mod._coint_pvalue(a, b)
+    p_indep = pairs_mod._coint_pvalue(a2, b2)
+    assert 0.0 <= p_coint <= 1.0 and 0.0 <= p_indep <= 1.0
+    # the fallback must still discriminate: cointegrated << independent
+    assert p_coint < p_indep
+    # and the backtest must run end-to-end with no statsmodels present
+    stats = pairs_mod.backtest_pair(a, b, {"lookback": 200})
+    assert np.isfinite(stats.win_rate) and stats.trades >= 0

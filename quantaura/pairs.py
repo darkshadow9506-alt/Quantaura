@@ -68,23 +68,80 @@ class PairPlan:
         return self.target_a < self.entry_a < self.stop_a
 
 
+def _ols_alpha_beta(a: np.ndarray, b: np.ndarray):
+    """OLS of a on [1, b] via numpy (no statsmodels dependency)."""
+    x = np.column_stack([np.ones_like(b), b])
+    coef, *_ = np.linalg.lstsq(x, a, rcond=None)
+    return float(coef[0]), float(coef[1])
+
+
 def _hedge_ratio_and_spread(a: pd.Series, b: pd.Series):
     """OLS hedge ratio (beta) and spread = a - beta*b - alpha."""
-    import statsmodels.api as sm
-
-    x = sm.add_constant(b.values)
-    model = sm.OLS(a.values, x).fit()
-    alpha, beta = float(model.params[0]), float(model.params[1])
+    alpha, beta = _ols_alpha_beta(a.values, b.values)
     spread = a - (beta * b + alpha)
     return alpha, beta, spread
 
 
-def _coint_pvalue(a: pd.Series, b: pd.Series) -> float:
-    from statsmodels.tsa.stattools import coint
+# Engle-Granger ADF critical values (constant, no trend). Residual-based
+# cointegration is more demanding than a plain ADF, so we use the standard
+# DF surface as a conservative-enough approximation in the offline fallback.
+_DF_CRIT = ((-3.90, 0.01), (-3.34, 0.05), (-3.04, 0.10), (-2.50, 0.25),
+            (-1.50, 0.50), (-0.50, 0.75))
 
+
+def _adf_tstat(resid: np.ndarray, max_lag: int = 1) -> float:
+    """t-stat of gamma in  Δyt = a + gamma*y_{t-1} + Σ δi Δy_{t-i} + e."""
+    y = np.asarray(resid, dtype=float)
+    y = y[np.isfinite(y)]
+    if len(y) < 20:
+        return 0.0
+    dy = np.diff(y)
+    lag = y[:-1]
+    n = len(dy)
+    cols = [np.ones(n - max_lag), lag[max_lag:]]
+    for i in range(1, max_lag + 1):
+        cols.append(dy[max_lag - i:n - i])
+    x = np.column_stack(cols)
+    yv = dy[max_lag:]
+    coef, *_ = np.linalg.lstsq(x, yv, rcond=None)
+    resid_r = yv - x @ coef
+    dof = len(yv) - x.shape[1]
+    if dof <= 0:
+        return 0.0
+    s2 = float(resid_r @ resid_r) / dof
+    xtx_inv = np.linalg.pinv(x.T @ x)
+    se_gamma = math.sqrt(max(s2 * xtx_inv[1, 1], 1e-30))
+    return float(coef[1] / se_gamma)
+
+
+def _pvalue_from_tstat(t: float) -> float:
+    """Map an ADF t-stat to an approximate p-value via the DF surface."""
+    if t <= _DF_CRIT[0][0]:
+        return _DF_CRIT[0][1]
+    if t >= _DF_CRIT[-1][0]:
+        return min(0.999, _DF_CRIT[-1][1] + (t - _DF_CRIT[-1][0]) * 0.1)
+    for (t_hi, p_hi), (t_lo, p_lo) in zip(_DF_CRIT, _DF_CRIT[1:]):
+        if t_hi <= t <= t_lo:
+            frac = (t - t_hi) / (t_lo - t_hi) if t_lo != t_hi else 0.0
+            return p_hi + frac * (p_lo - p_hi)
+    return 1.0
+
+
+def _coint_pvalue(a: pd.Series, b: pd.Series) -> float:
+    # Prefer statsmodels' MacKinnon p-values when available; fall back to a
+    # self-contained numpy Engle-Granger test so a missing optional dependency
+    # never disables pairs trading (or crashes the bot).
     try:
+        from statsmodels.tsa.stattools import coint
         _, pvalue, _ = coint(a.values, b.values)
         return float(pvalue)
+    except ImportError:
+        pass
+    except Exception:
+        return 1.0
+    try:
+        _, _, spread = _hedge_ratio_and_spread(a, b)
+        return _pvalue_from_tstat(_adf_tstat(spread.values))
     except Exception:
         return 1.0
 
@@ -181,8 +238,6 @@ def backtest_pair(close_a: pd.Series, close_b: pd.Series, cfg: dict) -> Backtest
     each bar are computed only from PRIOR data (no look-ahead). Returns
     per-trade R statistics.
     """
-    import statsmodels.api as sm
-
     lookback = int(cfg.get("lookback", 252))
     z_entry = float(cfg.get("zscore_entry", 2.0))
     z_exit = float(cfg.get("zscore_exit", 0.5))
@@ -203,10 +258,8 @@ def backtest_pair(close_a: pd.Series, close_b: pd.Series, cfg: dict) -> Backtest
         # estimate on the trailing window ending at t-1 (prior data only)
         a_w = a_all[t - lookback:t]
         b_w = b_all[t - lookback:t]
-        x = sm.add_constant(b_w)
         try:
-            beta = np.linalg.lstsq(x, a_w, rcond=None)[0]
-            alpha_, beta_ = beta[0], beta[1]
+            alpha_, beta_ = _ols_alpha_beta(a_w, b_w)
         except Exception:
             continue
         spread_w = a_w - (beta_ * b_w + alpha_)
