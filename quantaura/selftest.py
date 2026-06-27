@@ -350,6 +350,28 @@ def run_selftest() -> bool:
     unchanged = _refine_target(sdf, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, {})
     ok &= _check("empty structure keeps mechanical target", unchanged == 180.0)
 
+    # 14) SMC: FVG, order blocks, structural stop ------------------------
+    print("\n[14] SMC (FVG / order block / structural stop)")
+    from . import smc as smc_mod
+    from .strategies import _refine_stop
+    fvg = _pd.DataFrame({"open": [10, 11, 13, 13], "high": [10.5, 12, 14, 14],
+                         "low": [9.5, 11, 11.5, 12], "close": [10, 11.5, 13.5, 13]})
+    sup, _res = smc_mod.fair_value_gaps(fvg)
+    ok &= _check("bullish FVG support detected", abs(float(sup.iloc[2]) - 10.5) < 1e-9)
+    ob = _pd.DataFrame({"open": [10, 12, 11.0, 11], "high": [10.5, 12.5, 11.2, 13],
+                        "low": [9.5, 11.5, 10.5, 11], "close": [10, 12, 10.7, 13]})
+    obs, _obr = smc_mod.order_blocks(ob)
+    ok &= _check("bullish order block detected", abs(float(obs.iloc[3]) - 10.5) < 1e-9)
+    nn = 130
+    sd = _pd.DataFrame({c: [np.nan] * nn for c in
+                        ("piv_low", "piv_high", "fvg_sup", "fvg_res", "ob_sup", "ob_res")})
+    sd.loc[50, "piv_high"] = 210.0
+    sscfg = {"enabled": True, "structural_stop": True, "swing_width": 3,
+             "buffer_atr": 0.25, "lookback": 120, "stop_min_atr": 0.8, "stop_max_atr": 4.0}
+    sstop = _refine_stop(sd, 100, Side.SHORT, 200.0, 4.0, 210.0, sscfg)
+    ok &= _check("stop placed just beyond resistance (211 not blind 210)",
+                 abs(sstop - 211.0) < 1e-9, f"stop={sstop}")
+
     print("\n" + "=" * 50)
     print("RESULT:", "ALL CHECKS PASSED ✅" if ok else "SOME CHECKS FAILED ❌")
     return ok

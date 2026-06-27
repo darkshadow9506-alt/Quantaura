@@ -55,9 +55,15 @@ regime:
 structure:
   enabled: true
   swing_width: 3          # bars on each side that define a pivot high/low
-  buffer_atr: 0.25        # place the target this far (in ATR) before the level
-  lookback: 120           # only consider pivots within this many bars
-  min_rr: 0.8             # if refining drops reward:risk below this, keep the R-multiple
+  buffer_atr: 0.25        # place stop/target this far (in ATR) beyond/before the level
+  lookback: 120           # only consider levels within this many bars
+  min_rr: 0.8             # if refining the target drops reward:risk below this, keep R-multiple
+  # Structural stop: place the stop just beyond the nearest protective level
+  # (swing high/low, FVG edge, or order block) instead of a blind ATR stop.
+  # The structural risk is capped to [stop_min_atr, stop_max_atr] x ATR.
+  structural_stop: true
+  stop_min_atr: 0.8       # if the level is closer than this (in ATR), keep the ATR stop
+  stop_max_atr: 4.0       # if the level is farther than this, keep the ATR stop
 
 # --- Strategy: Trend / Time-Series Momentum --------------------------
 # Donchian-channel breakout with a long-term moving-average filter.

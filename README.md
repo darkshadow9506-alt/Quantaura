@@ -145,13 +145,22 @@ scenarios"):
 - **Multi-strategy confluence.** When several independent strategies fire
   the same direction on the same symbol, confidence is boosted — these are
   independent confirmations of the same idea.
-- **Structure-aware targets.** A blind R-multiple target can land just
-  beyond a key level where price reverses (so the order never fills). When
-  a significant swing level (support for shorts, resistance for longs) sits
-  between entry and the mechanical target, the target is pulled in to just
-  *before* it, so it fills before the bounce. The backtest uses the same
-  refined targets, so the published stats stay consistent. (Tunable in
-  `config.yaml → structure`.)
+- **Structure-aware stops & targets (Smart-Money-Concepts).** Blind
+  R-multiple levels ignore where price actually reacts. QuantAura detects
+  market structure — **swing pivots, Fair Value Gaps, and order blocks**
+  (all quantified and look-ahead-free) — and uses them for both ends of the
+  trade:
+  - **Targets** are pulled in to just *before* the nearest support
+    (shorts) / resistance (longs), so they fill before a reversal.
+  - **Stops** are placed just *beyond* the nearest protective level (the
+    structure that invalidates the trade), instead of a blind ATR distance,
+    with the structural risk capped to `[stop_min_atr, stop_max_atr] × ATR`
+    so it never gets wicked out just inside a level nor blows the risk out.
+
+  The backtest uses the same structural stops and targets, so the published
+  stats stay consistent. (These are mechanical approximations of
+  discretionary SMC/ICT ideas — they capture the quantifiable core, not a
+  chartist's exact hand-drawn reading. Tunable in `config.yaml → structure`.)
 
 All of these feed a single blended **confidence** score (0–100%) shown on
 every signal. None of them is a guarantee — they are honest probability
@@ -315,7 +324,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 77 unit/integration tests (synthetic data, no network)
+pytest -q            # 87 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 
@@ -334,6 +343,7 @@ quantaura/
   ml.py            gradient boosting + triple-barrier (purged walk-forward)
   montecarlo.py    bootstrap robustness + P(TP before SL) + spread-reversion
   optimize.py      walk-forward parameter search (scored out-of-sample)
+  smc.py           swing pivots, Fair Value Gaps, order blocks (structure)
   portfolio.py     batch risk: total risk-at-stop, exposure, concentration
   storage.py       SQLite persistence (signals + subscribers), dedup
   journal.py       resolve open signals to TP/SL, live track record
