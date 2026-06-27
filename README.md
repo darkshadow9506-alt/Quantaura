@@ -330,6 +330,13 @@ the bot three live-trading qualities:
 
 - **Stocks / ETFs / FX / indices →** [yfinance](https://github.com/ranaroussi/yfinance) (free, end-of-day + intraday).
 - **Crypto →** [ccxt](https://github.com/ccxt/ccxt) (default exchange **Toobit**; change via `CCXT_EXCHANGE` to any ccxt-supported id, e.g. `bybit`, `bitget`, `kucoin`).
+- **Iran free-market gold & USD →** [tgju.org](https://www.tgju.org) (USD/IRR,
+  18k/24k gold per gram, mesghal, Emami coin, global ounce). These are the
+  Tehran open-market prices. Because retail can't easily short them, this
+  class is **long-only** by default (`iran.long_only`), and signals carry an
+  extra disclaimer — these markets are heavily policy/news-driven, so treat
+  them as educational only. Needs network access to tgju (works from Iran
+  directly or through your proxy).
 
 OHLCV is cached locally for `cache_minutes` to respect rate limits. The
 default timeframe is **daily** — the horizon where retail quant edges are
@@ -342,7 +349,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 99 unit/integration tests (synthetic data, no network)
+pytest -q            # 104 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 
@@ -351,7 +358,7 @@ python -m quantaura selftest
 ```
 quantaura/
   config.py        settings (YAML + .env)
-  data.py          unified OHLCV providers (yfinance / ccxt) + cache
+  data.py          unified OHLCV providers (yfinance / ccxt / tgju) + cache
   indicators.py    ATR, RSI, Bollinger, z-score, ADX, Donchian, MACD,
                    Keltner, Dual-Thrust range (all look-ahead-free)
   strategies.py    TrendBreakout, MacdTrend, DualThrust, SqueezeBreakout,

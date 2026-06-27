@@ -16,6 +16,7 @@ class AssetClass(str, Enum):
     STOCK = "stock"
     FOREX = "forex"
     CRYPTO = "crypto"
+    IRAN = "iran"          # Iranian free-market gold & USD (tgju.org)
 
 
 @dataclass

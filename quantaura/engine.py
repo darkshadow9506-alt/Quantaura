@@ -217,6 +217,10 @@ def scan_symbol(
         plan = strat.evaluate(prepared, len(prepared) - 1)
         if plan is None or not plan.valid():
             continue
+        # retail can't easily short the dollar/gold in Iran -> long-only
+        if (asset_class is AssetClass.IRAN and plan.side is Side.SHORT
+                and settings.section("iran").get("long_only", True)):
+            continue
         # trailing (Chandelier) exit is used for trend/breakout strategies
         # when enabled, so the backtest reflects how the trade is managed.
         risk_cfg = settings.risk
@@ -569,11 +573,12 @@ def scan_universe(
 ) -> list[Signal]:
     """Scan the whole configured universe. Returns gated signals only."""
     uni = settings.universe
-    classes = classes or ["stocks", "forex", "crypto"]
+    classes = classes or ["stocks", "forex", "crypto", "iran"]
     class_map = {
         "stocks": AssetClass.STOCK,
         "forex": AssetClass.FOREX,
         "crypto": AssetClass.CRYPTO,
+        "iran": AssetClass.IRAN,
     }
     signals: list[Signal] = []
     for cls in classes:

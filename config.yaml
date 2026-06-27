@@ -31,6 +31,21 @@ universe:
     - SOL/USDT
     - BNB/USDT
     - XRP/USDT
+  iran:          # Iranian free-market gold & USD (tgju.org codes)
+    - price_dollar_rl   # USD/IRR (free market)
+    - geram18           # gold 18k / gram
+    - geram24           # gold 24k / gram
+    - mesghal           # gold mesghal
+    - sekee             # gold coin (Emami)
+    - ons               # global gold ounce (USD)
+
+# --- Iran market options ---------------------------------------------
+# The Tehran free market: prices come from tgju.org. Retail traders cannot
+# easily SHORT the dollar/gold here, so by default only LONG signals are
+# published for this class. These markets are heavily policy/news-driven —
+# quant signals are educational only.
+iran:
+  long_only: true
 
 # --- Data ------------------------------------------------------------
 data:

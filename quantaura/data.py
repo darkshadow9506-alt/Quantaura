@@ -119,6 +119,80 @@ def _fetch_ccxt(symbol: str, timeframe: str, lookback: int, exchange_id: str) ->
     return _normalize(df).tail(lookback)
 
 
+# ---------------------------------------------------------------------
+# tgju.org (Iranian free-market gold & USD)
+# ---------------------------------------------------------------------
+# Friendly names for the tgju symbol codes (used for display).
+IRAN_NAMES = {
+    "price_dollar_rl": "USD/IRR (free market, rial)",
+    "price_eur": "EUR/IRR (free market, rial)",
+    "geram18": "Gold 18k / gram (rial)",
+    "geram24": "Gold 24k / gram (rial)",
+    "mesghal": "Gold mesghal (rial)",
+    "sekee": "Gold coin — Emami (rial)",
+    "nim": "Gold coin — half (rial)",
+    "rob": "Gold coin — quarter (rial)",
+    "ons": "Gold ounce — global (USD)",
+}
+
+_TGJU_URL = "https://api.tgju.org/v1/market/indicator/summary-table-data/{symbol}"
+
+
+def _strip_html(s: str) -> str:
+    import re
+
+    return re.sub(r"<[^>]+>", "", str(s)).strip()
+
+
+def _parse_tgju(payload: dict, lookback: int) -> pd.DataFrame:
+    """Parse a tgju summary-table-data JSON payload into OHLCV.
+
+    Each row is [open, low, high, close, change, change%, gregorian_date,
+    jalali_date]. We take open/close directly and derive high/low as the
+    max/min of the four prices (robust to a low/high column swap). The
+    Gregorian date (year >= 1990) is used; the Jalali date is ignored.
+    """
+    rows = payload.get("data") or []
+    recs = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) < 5:
+            continue
+        try:
+            o, a, b, c = (float(str(row[k]).replace(",", "").strip()) for k in range(4))
+        except (ValueError, TypeError):
+            continue
+        # find the Gregorian date (a cell that parses to a sane year)
+        dt = pd.NaT
+        for k in range(4, len(row)):
+            cand = pd.to_datetime(_strip_html(row[k]), errors="coerce")
+            if not pd.isna(cand) and cand.year >= 1990:
+                dt = cand
+                break
+        if pd.isna(dt):
+            continue
+        recs.append((dt, o, max(o, a, b, c), min(o, a, b, c), c))
+    if not recs:
+        raise DataError("tgju returned no parseable rows")
+    df = pd.DataFrame(recs, columns=["date", "open", "high", "low", "close"])
+    df = df.dropna(subset=["date"]).set_index("date").sort_index()
+    df = df[~df.index.duplicated(keep="last")]
+    df["volume"] = 0.0
+    return df.tail(lookback)
+
+
+def _fetch_tgju(symbol: str, lookback: int) -> pd.DataFrame:
+    import requests  # lazy; provided transitively by yfinance/ccxt
+
+    url = _TGJU_URL.format(symbol=symbol)
+    resp = requests.get(url, timeout=20,
+                        headers={"User-Agent": "Mozilla/5.0 QuantAura"})
+    resp.raise_for_status()
+    df = _parse_tgju(resp.json(), lookback)
+    if df.empty:
+        raise DataError(f"tgju returned no data for {symbol}")
+    return df
+
+
 class DataError(RuntimeError):
     """Raised when a provider cannot return usable data."""
 
@@ -145,6 +219,8 @@ def get_ohlcv(
         try:
             if asset_class is AssetClass.CRYPTO:
                 df = _fetch_ccxt(symbol, timeframe, lookback, ccxt_exchange)
+            elif asset_class is AssetClass.IRAN:
+                df = _fetch_tgju(symbol, lookback)
             else:
                 df = _fetch_yfinance(symbol, timeframe, lookback)
             if df.empty:
@@ -159,6 +235,8 @@ def get_ohlcv(
 
 def asset_class_of(symbol: str, universe: dict[str, list[str]]) -> AssetClass:
     """Resolve which asset class a symbol belongs to from the configured universe."""
+    if symbol in universe.get("iran", []) or symbol in IRAN_NAMES:
+        return AssetClass.IRAN
     if symbol in universe.get("crypto", []) or "/" in symbol:
         return AssetClass.CRYPTO
     if symbol in universe.get("forex", []) or symbol.endswith("=X"):
