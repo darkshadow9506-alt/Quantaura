@@ -135,6 +135,35 @@ the proxy at all.)
 
 ---
 
+## Windows — easiest local always-on (free, via your v2ray config)
+
+For running on a Windows PC behind a v2ray client (e.g. **v2rayN**):
+
+1. **Install Python** from <https://python.org> — on the first screen tick
+   **"Add python.exe to PATH"**.
+2. **Get the code:** on the GitHub repo page, *Code → Download ZIP*, then
+   extract it (or `git clone` if you have Git).
+3. **Connect v2rayN** with your config. Find its **SOCKS port** (v2rayN →
+   the local listening / inbound port, usually `10808`).
+4. In the project folder, copy `.env.example` to `.env` and edit it:
+   ```
+   TELEGRAM_BOT_TOKEN=123456789:ABC...
+   PROXY_URL=socks5://127.0.0.1:10808
+   ```
+5. **Double-click `deploy\run_windows.bat`.** It builds a virtualenv,
+   installs everything, runs the self-test, and starts the bot (and
+   auto-restarts it if it crashes). Keep the window open.
+6. In Telegram, send your bot `/start`, then `/subscribe`.
+
+Keep it always-on:
+- **Don't let the PC sleep:** Settings → System → Power → Screen and sleep
+  → set *Sleep* to **Never** (when plugged in).
+- **Auto-start on boot:** press `Win+R`, type `shell:startup`, Enter, and
+  put a **shortcut to `run_windows.bat`** in that folder. Now it launches
+  on every login. (Make sure v2rayN also auto-starts.)
+
+---
+
 ## ⭐ Oracle Cloud Always-Free — step by step (recommended for 24/7)
 
 A genuinely-free, always-on Linux VM abroad. No proxy needed (Telegram and
