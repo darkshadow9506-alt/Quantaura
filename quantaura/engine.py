@@ -413,7 +413,7 @@ def scan_factor(settings: Settings, publish_only: bool = True) -> list[Signal]:
         if publish_only and not passed:
             continue
 
-        legs = factor_mod.rank_live(frames, fcfg)
+        legs = factor_mod.rank_live(frames, fcfg, settings.section("structure"))
         gate = settings.signal_gate
         oos = out_of_sample(stats, float(gate.get("oos_split", 0.7)))
         for leg in legs:

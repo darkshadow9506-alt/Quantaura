@@ -161,6 +161,10 @@ scenarios"):
   stats stay consistent. (These are mechanical approximations of
   discretionary SMC/ICT ideas — they capture the quantifiable core, not a
   chartist's exact hand-drawn reading. Tunable in `config.yaml → structure`.)
+  Applied to the trend/MACD/dual-thrust/squeeze strategies **and the
+  cross-sectional momentum factor**. Pairs use their cointegration-spread
+  levels and ML uses symmetric triple-barrier levels (both by design), so
+  they keep their own methodology.
 
 All of these feed a single blended **confidence** score (0–100%) shown on
 every signal. None of them is a guarantee — they are honest probability
@@ -352,7 +356,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 106 unit/integration tests (synthetic data, no network)
+pytest -q            # 108 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 

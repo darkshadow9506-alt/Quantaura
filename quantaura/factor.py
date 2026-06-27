@@ -112,9 +112,14 @@ def backtest_cross_sectional(panel: pd.DataFrame, cfg: dict) -> BacktestStats:
 
 # ---------------------------------------------------------------------
 def rank_live(
-    symbol_to_df: dict[str, pd.DataFrame], cfg: dict
+    symbol_to_df: dict[str, pd.DataFrame], cfg: dict, scfg: dict | None = None
 ) -> list[FactorLeg]:
-    """Build live long/short legs from the latest data in each frame."""
+    """Build live long/short legs from the latest data in each frame.
+
+    `scfg` is the structure config: when enabled, the stop/target are placed
+    relative to real market structure (swing levels, FVG, order blocks) just
+    like the single-asset strategies, instead of a blind ATR/R-multiple.
+    """
     lookback = int(cfg.get("lookback_days", 126))
     skip = int(cfg.get("skip_days", 21))
     top_n = int(cfg.get("top_n", 2))
@@ -123,6 +128,8 @@ def rank_live(
     atr_period = int(cfg.get("atr_period", 14))
     atr_mult = float(cfg.get("atr_stop_mult", 3.0))
     target_R = float(cfg.get("min_target_R", 2.0))
+    scfg = scfg or {}
+    use_structure = bool(scfg.get("enabled", False))
 
     scores: dict[str, float] = {}
     for sym, df in symbol_to_df.items():
@@ -143,13 +150,22 @@ def rank_live(
         a = float(atr_ind(df, atr_period).iloc[-1])
         if not math.isfinite(a) or a <= 0:
             return None
-        risk = atr_mult * a
-        if side is Side.LONG:
-            leg = FactorLeg(sym, side, score, rank, entry, entry - risk,
-                            entry + target_R * risk, a)
+        if use_structure:
+            # structure-aware stop/target (swing / FVG / order block), same as
+            # the momentum strategies, instead of a blind ATR/R-multiple.
+            from . import smc
+            from .strategies import _stop_and_target
+            d = df.copy()
+            smc.add_levels(d, int(scfg.get("swing_width", 3)))
+            stop, target = _stop_and_target(d, len(d) - 1, side, entry, a,
+                                            atr_mult, target_R, scfg)
         else:
-            leg = FactorLeg(sym, side, score, rank, entry, entry + risk,
-                            entry - target_R * risk, a)
+            risk = atr_mult * a
+            if side is Side.LONG:
+                stop, target = entry - risk, entry + target_R * risk
+            else:
+                stop, target = entry + risk, entry - target_R * risk
+        leg = FactorLeg(sym, side, score, rank, entry, stop, target, a)
         return leg if leg.valid() else None
 
     for rank, (sym, score) in enumerate(ranked[:top_n], start=1):

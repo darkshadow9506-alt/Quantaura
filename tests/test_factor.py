@@ -50,6 +50,28 @@ def test_rank_live_long_short_legs():
     assert max(l.score for l in longs) > min(s.score for s in shorts)
 
 
+def test_factor_structure_aware_levels():
+    # structure-enabled rank_live must produce valid, structure-placed legs
+    # (the refinement maths itself is covered in test_smc/test_strategies)
+    frames = _panel()
+    scfg = {"enabled": True, "swing_width": 3, "buffer_atr": 0.25, "lookback": 120,
+            "min_rr": 0.8, "structural_stop": True, "stop_min_atr": 0.8, "stop_max_atr": 4.0}
+    struct = factor_mod.rank_live(frames, CFG, scfg)
+    assert struct and all(l.valid() for l in struct)
+    # a structural short stop is never wider than the blind cap (stop_max_atr)
+    for l in struct:
+        risk_in_atr = abs(l.entry - l.stop) / l.atr
+        assert risk_in_atr <= 4.0 + 1e-6
+
+
+def test_factor_blind_levels_are_exact_2R():
+    frames = _panel()
+    blind = factor_mod.rank_live(frames, CFG, {"enabled": False})
+    assert blind
+    for l in blind:
+        assert abs(abs(l.target - l.entry) / abs(l.entry - l.stop) - 2.0) < 1e-6
+
+
 def test_factor_long_only_mode():
     cfg = dict(CFG, allow_short=False, bottom_n=0)
     frames = _panel()
