@@ -79,6 +79,39 @@ def test_scan_symbol_short_history_returns_empty(monkeypatch, settings):
     assert out == []
 
 
+def test_publish_filter_drops_low_confidence(monkeypatch, settings):
+    df = _rising()
+    monkeypatch.setattr(engine.data_mod, "get_ohlcv", lambda *a, **k: df)
+
+    # With publish_only=False the filter is a no-op (every candidate returned).
+    raw = engine.scan_symbol("FAKE", AssetClass.STOCK, settings, publish_only=False)
+    # Force an impossible confidence floor: nothing should survive publishing.
+    settings.signal_gate["min_confidence"] = 1.01
+    published = engine.scan_symbol("FAKE", AssetClass.STOCK, settings, publish_only=True)
+    assert published == []
+    # A zero floor disables the filter -> publishing returns the gated subset.
+    settings.signal_gate["min_confidence"] = 0.0
+    everything = engine.scan_symbol("FAKE", AssetClass.STOCK, settings, publish_only=True)
+    assert all(s.confidence >= 0.0 for s in everything)
+    assert len(raw) >= len(everything)
+
+
+def test_publish_filter_keeps_forecasts(settings):
+    from quantaura.models import Signal
+
+    settings.signal_gate["min_confidence"] = 0.99
+    weak = Signal(symbol="X", asset_class=AssetClass.IRAN, strategy="trend_breakout",
+                  side=Side.SHORT, entry=100, stop=102, target=94, risk_per_unit=2,
+                  reward_per_unit=6, rr_ratio=3.0, confidence=0.10, forecast_only=True)
+    strong_tradeable = Signal(symbol="Y", asset_class=AssetClass.STOCK,
+                              strategy="trend_breakout", side=Side.LONG, entry=100,
+                              stop=98, target=106, risk_per_unit=2, reward_per_unit=6,
+                              rr_ratio=3.0, confidence=0.10, forecast_only=False)
+    kept = engine._publish_filter([weak, strong_tradeable], settings, publish_only=True)
+    # forecast survives despite low confidence; the tradeable low-conf one is cut
+    assert weak in kept and strong_tradeable not in kept
+
+
 def test_scan_factor_builds_signals(monkeypatch, settings):
     # distinct trend per symbol so ranking is non-degenerate
     def fake(symbol, asset_class, **k):

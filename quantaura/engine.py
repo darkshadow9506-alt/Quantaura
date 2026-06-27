@@ -113,6 +113,25 @@ def _confidence(stats: BacktestStats, oos: BacktestStats, mc: MonteCarloStats,
 _SizingZero = risk_mod.SizingResult(0.0, 0.0, 0.0, 0.0)
 
 
+def _publish_filter(signals: list, settings: Settings, publish_only: bool) -> list:
+    """Drop low-confidence signals when publishing.
+
+    The signal_gate (win-rate / profit-factor / Monte-Carlo) decides whether a
+    strategy has a *measured* edge; this final filter additionally requires the
+    *blended* confidence (backtest + MC + out-of-sample + confluence) to clear
+    ``min_confidence`` so only strong setups reach subscribers. Forecast-only
+    items (e.g. Iran downside views) are informational and never filtered out.
+    Call this AFTER confluence, since confluence raises confidence.
+    """
+    if not publish_only:
+        return signals
+    floor = float(settings.signal_gate.get("min_confidence", 0.0))
+    if floor <= 0:
+        return signals
+    return [s for s in signals
+            if getattr(s, "forecast_only", False) or s.confidence >= floor]
+
+
 def _attach_plan(sig: Signal, settings: Settings) -> Signal:
     """Fill the explicit-plan fields: wallet %, risk %, risk-free (+1R) price."""
     eq = float(settings.account_equity or 0.0)
@@ -267,7 +286,7 @@ def scan_symbol(
     # confluence: when several strategies agree on the same direction,
     # raise confidence (independent confirmations of the same idea).
     _apply_confluence(out)
-    return out
+    return _publish_filter(out, settings, publish_only)
 
 
 def _apply_confluence(signals: list[Signal]) -> None:
@@ -371,7 +390,7 @@ def scan_pairs(settings: Settings, publish_only: bool = True) -> list[PairSignal
                 spread_z=round(plan.spread_z, 3),
                 leg_b_side=leg_b_side.value,
             ), settings))
-    return out
+    return _publish_filter(out, settings, publish_only)
 
 
 # ---------------------------------------------------------------------
@@ -443,7 +462,7 @@ def scan_factor(settings: Settings, publish_only: bool = True) -> list[Signal]:
                 confidence=_confidence(stats, oos, mc), passed_gate=passed,
                 timeframe=d.get("timeframe", "1d"), price_at_signal=round(leg.entry, 6),
             ), settings))
-    return out
+    return _publish_filter(out, settings, publish_only)
 
 
 # ---------------------------------------------------------------------
@@ -554,11 +573,12 @@ def scan_ml_symbol(
     passed = _passes_gate(stats, oos, mc, settings.signal_gate)
     if publish_only and not passed:
         return []
-    return [_build_signal(
+    out = [_build_signal(
         symbol=symbol, asset_class=asset_class, strategy_name="ml_gboost",
         plan=plan, stats=stats, regime="ml", settings=settings,
         passed_gate=passed, drift=drift,
     )]
+    return _publish_filter(out, settings, publish_only)
 
 
 def scan_ml(settings: Settings, publish_only: bool = True) -> list[Signal]:
