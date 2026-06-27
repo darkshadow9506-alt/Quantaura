@@ -135,6 +135,55 @@ the proxy at all.)
 
 ---
 
+## ⭐ Oracle Cloud Always-Free — step by step (recommended for 24/7)
+
+A genuinely-free, always-on Linux VM abroad. No proxy needed (Telegram and
+the data APIs are reachable directly), and your PC doesn't have to stay on.
+
+1. **Create the account:** sign up at <https://www.oracle.com/cloud/free/>.
+   A credit/debit card is required for identity verification only — the
+   **Always Free** resources are not charged. Pick a home region close to
+   you (any works).
+
+2. **Create the VM:** Console → *Compute → Instances → Create instance*.
+   - **Image:** Ubuntu 22.04.
+   - **Shape:** click *Change shape* and choose an **Always Free-eligible**
+     one — either `VM.Standard.A1.Flex` (ARM Ampere, e.g. 1–2 OCPU / 6–12 GB,
+     plenty) or `VM.Standard.E2.1.Micro` (AMD). If ARM says "out of
+     capacity", try the AMD micro or another availability domain.
+   - **SSH keys:** let it generate a key pair and **download the private
+     key** (or paste your own public key).
+   - Click **Create**. Note the instance's **public IP**.
+
+3. **Connect (SSH):**
+   ```bash
+   chmod 600 your-key.key
+   ssh -i your-key.key ubuntu@YOUR_PUBLIC_IP
+   ```
+   (On Windows use PuTTY or `ssh` in PowerShell.)
+
+4. **Install the bot (one block):**
+   ```bash
+   sudo apt update && sudo apt install -y git python3 python3-venv python3-pip
+   git clone <your-repo-url> quantaura && cd quantaura
+   cp .env.example .env
+   nano .env          # paste TELEGRAM_BOT_TOKEN (leave PROXY_URL empty), save
+   sudo bash deploy/install.sh
+   ```
+
+5. **Done.** The bot auto-starts on boot and restarts on crash. In Telegram,
+   message your bot `/start` then `/subscribe`. Logs: `journalctl -u quantaura -f`.
+
+Notes:
+- **No inbound ports needed** — the bot uses outbound long-polling, so you
+  don't have to open any firewall/security-list ports.
+- ARM (aarch64) is fine: all the Python wheels (numpy, pandas, scikit-learn,
+  statsmodels, scipy) have ARM builds.
+- Leave `PROXY_URL` empty on Oracle — the proxy is only for running behind a
+  censored network on your own PC.
+
+---
+
 ## Genuinely-free alternatives (if you don't want to use your VPS)
 
 - **Oracle Cloud Free Tier** — an *always-free* small VM (ARM Ampere or
