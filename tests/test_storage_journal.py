@@ -45,6 +45,19 @@ def test_close_and_performance(tmp_path):
     st.close()
 
 
+def test_clear_signals_keeps_subscribers(tmp_path):
+    st = Store(tmp_path / "s.db")
+    st.record_signal(_sig("AAA"), 3)
+    st.record_signal(_sig("BBB"), 3)
+    st.add_subscriber(123)
+    assert len(st.open_signals()) == 2
+    n = st.clear_signals()
+    assert n == 2
+    assert st.open_signals() == []
+    assert st.subscribers() == [123]      # subscriptions survive a reset
+    st.close()
+
+
 def test_subscribers(tmp_path):
     st = Store(tmp_path / "s.db")
     assert st.add_subscriber(111) is True

@@ -100,6 +100,12 @@ class Store:
             )
         return True
 
+    def clear_signals(self) -> int:
+        """Delete every journaled signal (keeps subscribers). Returns count."""
+        with self._conn:
+            cur = self._conn.execute("DELETE FROM signals")
+        return cur.rowcount
+
     def open_signals(self) -> list[dict]:
         with closing(self._conn.cursor()) as cur:
             cur.execute("SELECT * FROM signals WHERE status='open' ORDER BY id")

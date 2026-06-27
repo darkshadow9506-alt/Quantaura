@@ -128,6 +128,15 @@ def _cmd_manage(args, settings: Settings) -> int:
     return 0
 
 
+def _cmd_reset(args, settings: Settings) -> int:
+    from .storage import DEFAULT_DB, Store
+
+    store = Store(settings.journal_db_path or str(DEFAULT_DB))
+    n = store.clear_signals()
+    print(f"Cleared {n} signal(s) from the journal.")
+    return 0
+
+
 def _cmd_bot(args, settings: Settings) -> int:
     from .bot import run
 
@@ -165,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
                        choices=["trend", "mean_reversion", "macd", "dual_thrust", "squeeze"])
 
     sub.add_parser("manage", help="management advice for open journaled positions")
+    sub.add_parser("reset", help="clear the signal journal (start fresh)")
     sub.add_parser("bot", help="run the Telegram bot")
     sub.add_parser("selftest", help="offline self-check (no network)")
 
@@ -183,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         "ml": _cmd_ml,
         "optimize": _cmd_optimize,
         "manage": _cmd_manage,
+        "reset": _cmd_reset,
         "bot": _cmd_bot,
         "selftest": _cmd_selftest,
     }

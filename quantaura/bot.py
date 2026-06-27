@@ -103,6 +103,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• `/performance` — live track record of published signals\n"
         "• `/track` — resolve open signals against the latest prices\n"
         "• `/manage` — what to do now with each open position\n"
+        "• `/reset` — clear the journal (start fresh)\n"
         "• `/status` — show configuration\n\n"
         "Examples: `/signal AAPL` · `/signal EURUSD=X` · `/signal BTC/USDT`"
     )
@@ -349,6 +350,20 @@ async def cmd_manage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _reply(update.message, format_management(row, rev))
 
 
+async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if not await _guard(settings, update):
+        return
+    store: Store | None = context.application.bot_data.get("store")
+    if store is None:
+        await update.message.reply_text("Journaling is disabled.")
+        return
+    n = await asyncio.to_thread(store.clear_signals)
+    await update.message.reply_text(
+        f"🧹 Journal cleared — removed {n} signal(s). The next scan starts "
+        f"fresh with the current strategy. (Subscriptions kept.)")
+
+
 async def _scheduled_scan(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
     store: Store | None = context.application.bot_data.get("store")
@@ -428,6 +443,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("performance", cmd_performance))
     app.add_handler(CommandHandler("track", cmd_track))
     app.add_handler(CommandHandler("manage", cmd_manage))
+    app.add_handler(CommandHandler("reset", cmd_reset))
 
     # scheduled scan: runs if the job-queue extra is installed and there is
     # somewhere to send (a broadcast id or the subscriber journal).
