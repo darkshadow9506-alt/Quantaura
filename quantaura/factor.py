@@ -35,6 +35,7 @@ class FactorLeg:
     stop: float
     target: float
     atr: float
+    structure_note: str = ""
 
     @property
     def risk_per_unit(self) -> float:
@@ -157,15 +158,16 @@ def rank_live(
             from .strategies import _stop_and_target
             d = df.copy()
             smc.add_levels(d, int(scfg.get("swing_width", 3)))
-            stop, target = _stop_and_target(d, len(d) - 1, side, entry, a,
+            stop, target, snote = _stop_and_target(d, len(d) - 1, side, entry, a,
                                             atr_mult, target_R, scfg)
         else:
+            snote = ""
             risk = atr_mult * a
             if side is Side.LONG:
                 stop, target = entry - risk, entry + target_R * risk
             else:
                 stop, target = entry + risk, entry - target_R * risk
-        leg = FactorLeg(sym, side, score, rank, entry, stop, target, a)
+        leg = FactorLeg(sym, side, score, rank, entry, stop, target, a, snote)
         return leg if leg.valid() else None
 
     for rank, (sym, score) in enumerate(ranked[:top_n], start=1):

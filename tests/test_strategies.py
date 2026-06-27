@@ -112,6 +112,26 @@ def test_squeeze_fires_on_release():
     assert abs(fired.rr_ratio - 3.0) < 1e-6   # squeeze uses a 3R target
 
 
+def test_stop_and_target_emits_structure_note():
+    import numpy as np
+    import pandas as pd
+    from quantaura.strategies import _stop_and_target
+    n = 130
+    d = pd.DataFrame({c: [np.nan] * n for c in
+                      ("piv_low", "piv_high", "fvg_sup", "fvg_res", "ob_sup", "ob_res")})
+    d.loc[50, "piv_high"] = 108.0      # resistance ahead of a long target
+    scfg = {"enabled": True, "structural_stop": True, "swing_width": 3,
+            "buffer_atr": 0.25, "lookback": 120, "stop_min_atr": 0.8,
+            "stop_max_atr": 4.0, "min_rr": 0.8}
+    stop, target, note = _stop_and_target(d, 100, Side.LONG, 100.0, 2.0, 2.5, 2.0, scfg)
+    assert "Structure" in note and "resistance" in note and "108" in note
+    # no structure -> empty note (back-compat)
+    d2 = pd.DataFrame({c: [np.nan] * n for c in
+                       ("piv_low", "piv_high", "fvg_sup", "fvg_res", "ob_sup", "ob_res")})
+    _, _, note2 = _stop_and_target(d2, 100, Side.LONG, 100.0, 2.0, 2.5, 2.0, scfg)
+    assert note2 == ""
+
+
 def test_structure_target_refinement():
     import numpy as np
     import pandas as pd
@@ -124,29 +144,29 @@ def test_structure_target_refinement():
     # SHORT: a support at 185 sits between target(180) and entry(200) ->
     # target pulled up to 185 + 0.25*ATR
     df.loc[50, "piv_low"] = 185.0
-    t = _refine_target(df, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, scfg)
-    assert abs(t - 186.0) < 1e-9
+    t, lvl = _refine_target(df, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, scfg)
+    assert abs(t - 186.0) < 1e-9 and lvl == 185.0
 
     # LONG: a resistance at 215 between entry(200) and target(220) ->
     # target pulled down to 215 - 0.25*ATR
     df2 = pd.DataFrame({"piv_low": [np.nan] * n, "piv_high": [np.nan] * n})
     df2.loc[50, "piv_high"] = 215.0
-    t2 = _refine_target(df2, 100, Side.LONG, 200.0, 220.0, 4.0, 10.0, scfg)
-    assert abs(t2 - 214.0) < 1e-9
+    t2, lvl2 = _refine_target(df2, 100, Side.LONG, 200.0, 220.0, 4.0, 10.0, scfg)
+    assert abs(t2 - 214.0) < 1e-9 and lvl2 == 215.0
 
     # no qualifying level -> mechanical target unchanged
-    assert _refine_target(df, 100, Side.SHORT, 200.0, 190.0, 4.0, 10.0, scfg) == 190.0
+    assert _refine_target(df, 100, Side.SHORT, 200.0, 190.0, 4.0, 10.0, scfg) == (190.0, None)
 
     # empty/disabled structure -> unchanged (back-compat)
-    assert _refine_target(df, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, {}) == 180.0
+    assert _refine_target(df, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, {}) == (180.0, None)
     assert _refine_target(df, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0,
-                          {"enabled": False}) == 180.0
+                          {"enabled": False}) == (180.0, None)
 
     # refined reward:risk below min_rr -> keep mechanical
     df.loc[60, "piv_low"] = 199.0     # support 1 point below entry -> tiny reward
     df3 = pd.DataFrame({"piv_low": [np.nan] * n, "piv_high": [np.nan] * n})
     df3.loc[60, "piv_low"] = 199.0
-    assert _refine_target(df3, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, scfg) == 180.0
+    assert _refine_target(df3, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, scfg) == (180.0, None)
 
 
 def test_structure_geometry_stays_valid(trending_df):

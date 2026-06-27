@@ -346,11 +346,12 @@ def run_selftest() -> bool:
     sdf.loc[50, "piv_low"] = 185.0
     scfg = {"enabled": True, "swing_width": 3, "buffer_atr": 0.25,
             "lookback": 120, "min_rr": 0.8}
-    refined = _refine_target(sdf, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, scfg)
+    refined, rlvl = _refine_target(sdf, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, scfg)
     ok &= _check("target pulled in to just before support (186 vs blind 180)",
-                 abs(refined - 186.0) < 1e-9, f"refined={refined}")
-    unchanged = _refine_target(sdf, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, {})
-    ok &= _check("empty structure keeps mechanical target", unchanged == 180.0)
+                 abs(refined - 186.0) < 1e-9 and rlvl == 185.0, f"refined={refined}")
+    unchanged, ulvl = _refine_target(sdf, 100, Side.SHORT, 200.0, 180.0, 4.0, 10.0, {})
+    ok &= _check("empty structure keeps mechanical target",
+                 unchanged == 180.0 and ulvl is None)
 
     # 14) SMC: FVG, order blocks, structural stop ------------------------
     print("\n[14] SMC (FVG / order block / structural stop)")
@@ -370,9 +371,9 @@ def run_selftest() -> bool:
     sd.loc[50, "piv_high"] = 210.0
     sscfg = {"enabled": True, "structural_stop": True, "swing_width": 3,
              "buffer_atr": 0.25, "lookback": 120, "stop_min_atr": 0.8, "stop_max_atr": 4.0}
-    sstop = _refine_stop(sd, 100, Side.SHORT, 200.0, 4.0, 210.0, sscfg)
+    sstop, slvl = _refine_stop(sd, 100, Side.SHORT, 200.0, 4.0, 210.0, sscfg)
     ok &= _check("stop placed just beyond resistance (211 not blind 210)",
-                 abs(sstop - 211.0) < 1e-9, f"stop={sstop}")
+                 abs(sstop - 211.0) < 1e-9 and slvl == 210.0, f"stop={sstop}")
 
     # 15) active trade management ----------------------------------------
     print("\n[15] Active trade management")

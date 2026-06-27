@@ -135,7 +135,11 @@ def format_signal(sig: Signal, md: bool = True) -> str:
     if not sig.passed_gate:
         lines.append("❗ Below publish threshold — shown for inspection only.")
     lines.append("")
-    lines.append(f"💡 {sig.rationale}")
+    # split out the structural (SMC) note so it stands on its own prominent line
+    rationale, _, struct = sig.rationale.partition("🧱 Structure:")
+    lines.append(f"💡 {rationale.strip()}")
+    if struct.strip():
+        lines.append(f"🧱 Structure: {struct.strip()}")
     if sig.management:
         lines.append(f"🧭 {sig.management}")
     if sig.asset_class is AssetClass.IRAN:

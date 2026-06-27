@@ -72,7 +72,7 @@ def update_open_signals(store, settings, max_hold_days: int = 30) -> dict:
 
     uni = settings.universe
     d = settings.data
-    summary = {"checked": 0, "tp": 0, "sl": 0, "expired": 0}
+    summary = {"checked": 0, "tp": 0, "sl": 0, "expired": 0, "no_data": 0}
 
     for row in store.open_signals():
         summary["checked"] += 1
@@ -89,8 +89,10 @@ def update_open_signals(store, settings, max_hold_days: int = 30) -> dict:
                 ccxt_exchange=settings.ccxt_exchange,
             )
         except Exception:
+            summary["no_data"] += 1
             continue
         if df is None or df.empty:
+            summary["no_data"] += 1
             continue
 
         after = bars_after(df, created)     # bars strictly after the signal

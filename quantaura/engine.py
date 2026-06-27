@@ -457,7 +457,8 @@ def scan_factor(settings: Settings, publish_only: bool = True) -> list[Signal]:
                 regime="cross-sectional",
                 rationale=(f"Ranked #{leg.rank} by 6-1 momentum "
                            f"({leg.score*100:+.1f}%) among {cls} — "
-                           f"{'strongest→long' if leg.side is Side.LONG else 'weakest→short'}."),
+                           f"{'strongest→long' if leg.side is Side.LONG else 'weakest→short'}."
+                           + (f" {leg.structure_note}" if leg.structure_note else "")),
                 backtest=stats, oos=oos, montecarlo=mc,
                 confidence=_confidence(stats, oos, mc), passed_gate=passed,
                 timeframe=d.get("timeframe", "1d"), price_at_signal=round(leg.entry, 6),

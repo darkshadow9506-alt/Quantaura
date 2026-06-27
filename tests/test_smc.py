@@ -60,37 +60,40 @@ SCFG = {"enabled": True, "structural_stop": True, "swing_width": 3,
 
 def test_structural_stop_short_beyond_resistance():
     d = _levels_df([("piv_high", 50, 210.0)])
-    stop = _refine_stop(d, 100, Side.SHORT, 200.0, 4.0, base_stop=210.0, scfg=SCFG)
+    stop, lvl = _refine_stop(d, 100, Side.SHORT, 200.0, 4.0, base_stop=210.0, scfg=SCFG)
     assert abs(stop - 211.0) < 1e-9            # 210 + 0.25*4
+    assert lvl == 210.0                        # anchored to the resistance
 
 
 def test_structural_stop_long_below_support_via_fvg():
     d = _levels_df([("fvg_sup", 50, 190.0)])
-    stop = _refine_stop(d, 100, Side.LONG, 200.0, 4.0, base_stop=190.0, scfg=SCFG)
+    stop, lvl = _refine_stop(d, 100, Side.LONG, 200.0, 4.0, base_stop=190.0, scfg=SCFG)
     assert abs(stop - 189.0) < 1e-9            # 190 - 0.25*4
+    assert lvl == 190.0
 
 
 def test_structural_stop_too_far_keeps_blind():
     d = _levels_df([("piv_high", 60, 230.0)])
-    stop = _refine_stop(d, 100, Side.SHORT, 200.0, 4.0, base_stop=210.0, scfg=SCFG)
-    assert stop == 210.0                       # 30 > 4*ATR -> keep blind
+    stop, lvl = _refine_stop(d, 100, Side.SHORT, 200.0, 4.0, base_stop=210.0, scfg=SCFG)
+    assert stop == 210.0 and lvl is None       # 30 > 4*ATR -> keep blind
 
 
 def test_structural_stop_too_close_keeps_blind():
     d = _levels_df([("piv_high", 60, 201.0)])
-    stop = _refine_stop(d, 100, Side.SHORT, 200.0, 4.0, base_stop=210.0, scfg=SCFG)
-    assert stop == 210.0                       # 1 < 0.8*ATR(=3.2) -> keep blind
+    stop, lvl = _refine_stop(d, 100, Side.SHORT, 200.0, 4.0, base_stop=210.0, scfg=SCFG)
+    assert stop == 210.0 and lvl is None       # 1 < 0.8*ATR(=3.2) -> keep blind
 
 
 def test_stop_and_target_geometry():
     # support below for a long, resistance above for stop
     d = _levels_df([("piv_low", 50, 188.0)])
-    stop, target = _stop_and_target(d, 100, Side.SHORT, 200.0, 4.0,
-                                    atr_stop_mult=2.5, min_target_R=2.0, scfg=SCFG)
+    stop, target, note = _stop_and_target(d, 100, Side.SHORT, 200.0, 4.0,
+                                          atr_stop_mult=2.5, min_target_R=2.0, scfg=SCFG)
     assert target < 200.0 < stop               # valid SHORT geometry
     assert target > 0
 
 
 def test_empty_structure_is_backcompat():
     d = _levels_df([("piv_high", 50, 210.0)])
-    assert _refine_stop(d, 100, Side.SHORT, 200.0, 4.0, base_stop=210.0, scfg={}) == 210.0
+    stop, lvl = _refine_stop(d, 100, Side.SHORT, 200.0, 4.0, base_stop=210.0, scfg={})
+    assert stop == 210.0 and lvl is None

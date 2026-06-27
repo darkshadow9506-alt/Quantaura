@@ -315,9 +315,18 @@ async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("⏱ Resolving open signals against the latest prices…")
     max_hold = int(settings.section("journal").get("max_hold_days", 30))
     s = await asyncio.to_thread(journal_mod.update_open_signals, store, settings, max_hold)
-    await update.message.reply_text(
-        f"Checked {s['checked']} open signal(s): {s['tp']} hit target, "
-        f"{s['sl']} stopped, {s['expired']} expired.")
+    if s["checked"] == 0:
+        await update.message.reply_text(
+            "No open signals to track yet. Run /scan first so positions get "
+            "journaled, then /track resolves them against later prices.")
+        return
+    msg = (f"Checked {s['checked']} open signal(s): {s['tp']} hit target, "
+           f"{s['sl']} stopped, {s['expired']} expired.")
+    if s.get("no_data"):
+        msg += (f"\n⚠️ Couldn't fetch prices for {s['no_data']} of them "
+                f"(network/proxy?) — they were left open. Make sure v2rayN is "
+                f"connected, then try again.")
+    await update.message.reply_text(msg)
     await _reply(update.message, journal_mod.format_performance(store.performance()))
 
 
@@ -341,9 +350,18 @@ async def cmd_manage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text("⏱ Reviewing open positions…")
     max_hold = int(settings.section("journal").get("max_hold_days", 30))
     await asyncio.to_thread(journal_mod.update_open_signals, store, settings, max_hold)
+    open_count = len(await asyncio.to_thread(store.open_signals))
     reviews = await asyncio.to_thread(engine.review_positions, settings, store)
     if not reviews:
-        await update.message.reply_text("No open positions to manage.")
+        if open_count == 0:
+            await update.message.reply_text(
+                "No open positions to manage. Run /scan first so strong signals "
+                "get journaled — then /manage gives live SL/TP advice on them.")
+        else:
+            await update.message.reply_text(
+                f"You have {open_count} open position(s), but I couldn't fetch "
+                f"live prices for them (network/proxy?). Check that v2rayN is "
+                f"connected, then try /manage again.")
         return
     from .formatting import format_management
     for row, rev in reviews:

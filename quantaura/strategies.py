@@ -47,6 +47,13 @@ class TradePlan:
     regime: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        # surface the structural (SMC) levels the stop/target were anchored to
+        # right in the rationale, so the published signal SHOWS it was used.
+        note = self.meta.get("structure_note") if self.meta else None
+        if note and note not in self.rationale:
+            self.rationale = f"{self.rationale} {note}"
+
     @property
     def risk_per_unit(self) -> float:
         return abs(self.entry - self.stop)
@@ -91,33 +98,37 @@ def _refine_target(df: pd.DataFrame, i: int, side: Side, entry: float,
     target, move the target to just *before* it so the order fills before
     price can reverse off that level. Falls back to the mechanical target if
     nothing qualifies or the refined reward:risk drops below `min_rr`.
+
+    Returns (target, anchored_level_or_None).
     """
     if not scfg or not scfg.get("enabled", True) or atr <= 0 or risk <= 0:
-        return target
+        return target, None
     buf = float(scfg.get("buffer_atr", 0.25)) * atr
     min_rr = float(scfg.get("min_rr", 0.8))
     lo, hi = _struct_window(df, i, scfg)
     if hi <= lo:
-        return target
+        return target, None
 
     if side is Side.LONG:
         cand = [v for v in smc.collect_levels(df, lo, hi, smc.RES_COLS)
                 if entry < v < target]
         if not cand:
-            return target
-        new_t = min(cand) - buf         # lowest resistance is hit first
-        if new_t <= entry:
-            return target
-        return new_t if (new_t - entry) / risk >= min_rr else target
+            return target, None
+        lvl = min(cand)                 # lowest resistance is hit first
+        new_t = lvl - buf
+        if new_t <= entry or (new_t - entry) / risk < min_rr:
+            return target, None
+        return new_t, lvl
     else:
         cand = [v for v in smc.collect_levels(df, lo, hi, smc.SUP_COLS)
                 if target < v < entry]
         if not cand:
-            return target
-        new_t = max(cand) + buf         # highest support is hit first
-        if new_t >= entry:
-            return target
-        return new_t if (entry - new_t) / risk >= min_rr else target
+            return target, None
+        lvl = max(cand)                 # highest support is hit first
+        new_t = lvl + buf
+        if new_t >= entry or (entry - new_t) / risk < min_rr:
+            return target, None
+        return new_t, lvl
 
 
 def _refine_stop(df: pd.DataFrame, i: int, side: Side, entry: float,
@@ -130,46 +141,71 @@ def _refine_stop(df: pd.DataFrame, i: int, side: Side, entry: float,
     stop_max_atr] × ATR — if the level is too far or too close, the blind
     ATR stop is kept. This avoids being wicked out just inside a level while
     never letting the risk blow out.
+
+    Returns (stop, anchored_level_or_None).
     """
     if (not scfg or not scfg.get("enabled", True)
             or not scfg.get("structural_stop", True) or atr <= 0):
-        return base_stop
+        return base_stop, None
     buf = float(scfg.get("buffer_atr", 0.25)) * atr
     max_risk = float(scfg.get("stop_max_atr", 4.0)) * atr
     min_risk = float(scfg.get("stop_min_atr", 0.5)) * atr
     lo, hi = _struct_window(df, i, scfg)
     if hi <= lo:
-        return base_stop
+        return base_stop, None
 
     if side is Side.SHORT:
         cand = [v for v in smc.collect_levels(df, lo, hi, smc.RES_COLS) if v > entry]
         if not cand:
-            return base_stop
-        new_stop = min(cand) + buf      # just above nearest resistance
+            return base_stop, None
+        lvl = min(cand)                 # nearest resistance above
+        new_stop = lvl + buf            # just above it
         risk = new_stop - entry
     else:
         cand = [v for v in smc.collect_levels(df, lo, hi, smc.SUP_COLS) if v < entry]
         if not cand:
-            return base_stop
-        new_stop = max(cand) - buf      # just below nearest support
+            return base_stop, None
+        lvl = max(cand)                 # nearest support below
+        new_stop = lvl - buf            # just below it
         risk = entry - new_stop
     if not (min_risk <= risk <= max_risk):
-        return base_stop
-    return new_stop
+        return base_stop, None
+    return new_stop, lvl
 
 
 def _stop_and_target(df: pd.DataFrame, i: int, side: Side, entry: float, atr: float,
                      atr_stop_mult: float, min_target_R: float, scfg: dict):
-    """Structure-aware (stop, target): structural stop -> R-multiple target
-    from that risk -> structural target. Falls back to ATR/R-multiple."""
+    """Structure-aware (stop, target, note): structural stop -> R-multiple
+    target from that risk -> structural target. Falls back to ATR/R-multiple.
+
+    `note` is a short human string naming the structural levels the stop and
+    target were anchored to (empty when nothing structural applied), so the
+    published signal can SHOW that SMC levels were used.
+    """
+    scfg = scfg or {}
     base_stop = entry - atr_stop_mult * atr if side is Side.LONG else entry + atr_stop_mult * atr
-    stop = _refine_stop(df, i, side, entry, atr, base_stop, scfg or {})
+    stop, stop_lvl = _refine_stop(df, i, side, entry, atr, base_stop, scfg)
     risk = abs(entry - stop)
     if risk <= 0:
-        stop, risk = base_stop, abs(entry - base_stop)
+        stop, stop_lvl, risk = base_stop, None, abs(entry - base_stop)
     target = entry + min_target_R * risk if side is Side.LONG else entry - min_target_R * risk
-    target = _refine_target(df, i, side, entry, target, atr, risk, scfg or {})
-    return stop, target
+    target, tgt_lvl = _refine_target(df, i, side, entry, target, atr, risk, scfg)
+    note = _structure_note(side, stop_lvl, tgt_lvl)
+    return stop, target, note
+
+
+def _structure_note(side: Side, stop_lvl, tgt_lvl) -> str:
+    """Human note describing which SMC levels anchored the stop / target."""
+    if stop_lvl is None and tgt_lvl is None:
+        return ""
+    parts = []
+    if stop_lvl is not None:
+        where = "support" if side is Side.LONG else "resistance"
+        parts.append(f"SL anchored beyond {where} {stop_lvl:.4f}")
+    if tgt_lvl is not None:
+        where = "resistance" if side is Side.LONG else "support"
+        parts.append(f"TP set just before {where} {tgt_lvl:.4f}")
+    return "🧱 Structure: " + "; ".join(parts) + "."
 
 
 # ---------------------------------------------------------------------
@@ -228,25 +264,25 @@ class TrendBreakout:
         # Long: break above prior N-bar high, in an uptrend
         if high > dc_up and close > ma_slow:
             entry = close
-            stop, target = _stop_and_target(df, i, Side.LONG, entry, atr_v,
+            stop, target, snote = _stop_and_target(df, i, Side.LONG, entry, atr_v,
                                             self.atr_stop_mult, self.min_target_R, self.structure)
             return TradePlan(
                 Side.LONG, entry, stop, target, atr_v,
                 rationale=(f"{self.donchian_entry}-bar breakout above {dc_up:.4f} "
                            f"with price over {self.ma_slow}MA (uptrend)."),
-                meta={"dc_level": dc_up},
+                meta={"dc_level": dc_up, "structure_note": snote},
             )
 
         # Short: break below prior N-bar low, in a downtrend
         if low < dc_low and close < ma_slow:
             entry = close
-            stop, target = _stop_and_target(df, i, Side.SHORT, entry, atr_v,
+            stop, target, snote = _stop_and_target(df, i, Side.SHORT, entry, atr_v,
                                             self.atr_stop_mult, self.min_target_R, self.structure)
             return TradePlan(
                 Side.SHORT, entry, stop, target, atr_v,
                 rationale=(f"{self.donchian_entry}-bar breakdown below {dc_low:.4f} "
                            f"with price under {self.ma_slow}MA (downtrend)."),
-                meta={"dc_level": dc_low},
+                meta={"dc_level": dc_low, "structure_note": snote},
             )
         return None
 
@@ -367,22 +403,24 @@ class MacdTrend:
         # bullish crossover (hist turns positive) in an uptrend
         if hist > 0 and hist_prev <= 0 and close > ma_slow:
             entry = close
-            stop, target = _stop_and_target(df, i, Side.LONG, entry, atr_v,
+            stop, target, snote = _stop_and_target(df, i, Side.LONG, entry, atr_v,
                                             self.atr_stop_mult, self.min_target_R, self.structure)
             return TradePlan(
                 Side.LONG, entry, stop, target, atr_v,
                 rationale=(f"MACD bullish cross (hist {hist_prev:.4f}→{hist:.4f}) "
                            f"with price above {self.ma_slow}MA."),
+                meta={"structure_note": snote},
             )
         # bearish crossover in a downtrend
         if hist < 0 and hist_prev >= 0 and close < ma_slow:
             entry = close
-            stop, target = _stop_and_target(df, i, Side.SHORT, entry, atr_v,
+            stop, target, snote = _stop_and_target(df, i, Side.SHORT, entry, atr_v,
                                             self.atr_stop_mult, self.min_target_R, self.structure)
             return TradePlan(
                 Side.SHORT, entry, stop, target, atr_v,
                 rationale=(f"MACD bearish cross (hist {hist_prev:.4f}→{hist:.4f}) "
                            f"with price below {self.ma_slow}MA."),
+                meta={"structure_note": snote},
             )
         return None
 
@@ -434,23 +472,23 @@ class DualThrust:
 
         if high > buyline and trend_ok_long:
             entry = close
-            stop, target = _stop_and_target(df, i, Side.LONG, entry, atr_v,
+            stop, target, snote = _stop_and_target(df, i, Side.LONG, entry, atr_v,
                                             self.atr_stop_mult, self.min_target_R, self.structure)
             return TradePlan(
                 Side.LONG, entry, stop, target, atr_v,
                 rationale=(f"Dual Thrust break above BuyLine {buyline:.4f} "
                            f"(K1={self.k1}, {self.n}-bar range)."),
-                meta={"buyline": buyline},
+                meta={"buyline": buyline, "structure_note": snote},
             )
         if low < sellline and trend_ok_short:
             entry = close
-            stop, target = _stop_and_target(df, i, Side.SHORT, entry, atr_v,
+            stop, target, snote = _stop_and_target(df, i, Side.SHORT, entry, atr_v,
                                             self.atr_stop_mult, self.min_target_R, self.structure)
             return TradePlan(
                 Side.SHORT, entry, stop, target, atr_v,
                 rationale=(f"Dual Thrust break below SellLine {sellline:.4f} "
                            f"(K2={self.k2}, {self.n}-bar range)."),
-                meta={"sellline": sellline},
+                meta={"sellline": sellline, "structure_note": snote},
             )
         return None
 
@@ -510,19 +548,21 @@ class SqueezeBreakout:
         if sq_prev and not sq_now:
             if close > bb_mid and close > ma_slow:    # upward release in uptrend
                 entry = close
-                stop, target = _stop_and_target(df, i, Side.LONG, entry, atr_v,
+                stop, target, snote = _stop_and_target(df, i, Side.LONG, entry, atr_v,
                                                 self.atr_stop_mult, self.min_target_R, self.structure)
                 return TradePlan(
                     Side.LONG, entry, stop, target, atr_v,
                     rationale="TTM squeeze released upward (vol expansion) above the mean and 200MA.",
+                    meta={"structure_note": snote},
                 )
             if close < bb_mid and close < ma_slow:    # downward release in downtrend
                 entry = close
-                stop, target = _stop_and_target(df, i, Side.SHORT, entry, atr_v,
+                stop, target, snote = _stop_and_target(df, i, Side.SHORT, entry, atr_v,
                                                 self.atr_stop_mult, self.min_target_R, self.structure)
                 return TradePlan(
                     Side.SHORT, entry, stop, target, atr_v,
                     rationale="TTM squeeze released downward (vol expansion) below the mean and 200MA.",
+                    meta={"structure_note": snote},
                 )
         return None
 
