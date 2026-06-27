@@ -150,7 +150,8 @@ def _record_new(context, signals: list) -> tuple[list, int]:
     cooldown = float(jcfg.get("cooldown_days", 3))
     new, repeats = [], 0
     for s in signals:
-        if not s.passed_gate:        # only journal genuinely published signals
+        # only journal genuinely published, tradeable positions
+        if not s.passed_gate or s.forecast_only:
             new.append(s)
             continue
         if store.record_signal(s, cooldown):

@@ -110,6 +110,9 @@ def _confidence(stats: BacktestStats, oos: BacktestStats, mc: MonteCarloStats,
     )
 
 
+_SizingZero = risk_mod.SizingResult(0.0, 0.0, 0.0, 0.0)
+
+
 def _attach_plan(sig: Signal, settings: Settings) -> Signal:
     """Fill the explicit-plan fields: wallet %, risk %, risk-free (+1R) price."""
     eq = float(settings.account_equity or 0.0)
@@ -149,11 +152,14 @@ def _build_signal(
     passed_gate: bool,
     drift: float = 0.0,
     management: str = "",
+    forecast_only: bool = False,
 ) -> Signal:
     gate = settings.signal_gate
     oos, mc = _assess(plan.side, plan.entry, plan.stop, plan.target, plan.atr,
                       stats, drift, gate)
-    sizing = _sized(settings, plan.entry, plan.risk_per_unit, stats)
+    # a forecast is not a position you enter -> no size / risk
+    sizing = (_SizingZero if forecast_only
+              else _sized(settings, plan.entry, plan.risk_per_unit, stats))
     sig = Signal(
         symbol=symbol,
         asset_class=asset_class,
@@ -177,6 +183,7 @@ def _build_signal(
         montecarlo=mc,
         confidence=_confidence(stats, oos, mc),
         passed_gate=passed_gate,
+        forecast_only=forecast_only,
         timeframe=settings.data.get("timeframe", "1d"),
         price_at_signal=round(plan.entry, 6),
     )
@@ -217,10 +224,14 @@ def scan_symbol(
         plan = strat.evaluate(prepared, len(prepared) - 1)
         if plan is None or not plan.valid():
             continue
-        # retail can't easily short the dollar/gold in Iran -> long-only
-        if (asset_class is AssetClass.IRAN and plan.side is Side.SHORT
-                and settings.section("iran").get("long_only", True)):
-            continue
+        # Iranian gold/USD shorts: retail usually can't short them, so by
+        # default publish them as a non-tradeable "downside forecast".
+        forecast_only = False
+        if asset_class is AssetClass.IRAN and plan.side is Side.SHORT:
+            mode = settings.section("iran").get("short_mode", "forecast")
+            if mode == "off":
+                continue
+            forecast_only = (mode != "trade")
         # trailing (Chandelier) exit is used for trend/breakout strategies
         # when enabled, so the backtest reflects how the trade is managed.
         risk_cfg = settings.risk
@@ -249,6 +260,7 @@ def scan_symbol(
                 passed_gate=passed,
                 drift=drift,
                 management=management,
+                forecast_only=forecast_only,
             )
         )
 

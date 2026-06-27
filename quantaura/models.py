@@ -98,6 +98,7 @@ class Signal:
     confluence: int = 1           # how many strategies agree (same symbol+side)
     confidence: float = 0.0       # 0..1, blended quality score
     passed_gate: bool = False
+    forecast_only: bool = False   # directional forecast you can't trade (e.g. Iran shorts)
 
     timeframe: str = "1d"
     price_at_signal: float = 0.0

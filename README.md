@@ -332,11 +332,14 @@ the bot three live-trading qualities:
 - **Crypto →** [ccxt](https://github.com/ccxt/ccxt) (default exchange **Toobit**; change via `CCXT_EXCHANGE` to any ccxt-supported id, e.g. `bybit`, `bitget`, `kucoin`).
 - **Iran free-market gold & USD →** [tgju.org](https://www.tgju.org) (USD/IRR,
   18k/24k gold per gram, mesghal, Emami coin, global ounce). These are the
-  Tehran open-market prices. Because retail can't easily short them, this
-  class is **long-only** by default (`iran.long_only`), and signals carry an
-  extra disclaimer — these markets are heavily policy/news-driven, so treat
-  them as educational only. Needs network access to tgju (works from Iran
-  directly or through your proxy).
+  Tehran open-market prices. Retail can't easily short them, so SHORT
+  signals are published as a **"downside forecast"** by default
+  (`iran.short_mode: forecast`) — no position to enter, but it shows *how
+  far price may fall* so you can time your buys or take profit on holdings
+  (set `trade` to treat them as normal shorts, or `off` to drop them).
+  Signals carry an extra disclaimer — these markets are heavily
+  policy/news-driven, so treat them as educational only. Needs network
+  access to tgju (works from Iran directly or through your proxy).
 
 OHLCV is cached locally for `cache_minutes` to respect rate limits. The
 default timeframe is **daily** — the horizon where retail quant edges are
@@ -349,7 +352,7 @@ real and execution speed doesn't dominate.
 ## Tests
 
 ```bash
-pytest -q            # 104 unit/integration tests (synthetic data, no network)
+pytest -q            # 106 unit/integration tests (synthetic data, no network)
 python -m quantaura selftest
 ```
 

@@ -4,7 +4,7 @@ import pandas as pd
 from quantaura import data as data_mod
 from quantaura.config import Settings
 from quantaura.data import _parse_tgju, asset_class_of
-from quantaura.models import AssetClass, Side
+from quantaura.models import AssetClass, Side, Signal
 
 
 SAMPLE = {"total": 4, "data": [
@@ -53,10 +53,35 @@ def _iran_df(n=320, seed=1):
          "volume": np.zeros(n)}, index=idx)
 
 
-def test_iran_scan_is_long_only(monkeypatch):
+def test_iran_shorts_are_forecasts(monkeypatch):
     from quantaura import engine
     settings = Settings.load()
     monkeypatch.setattr(engine.data_mod, "get_ohlcv", lambda *a, **k: _iran_df())
     sigs = engine.scan_symbol("price_dollar_rl", AssetClass.IRAN, settings, publish_only=False)
-    # long-only filter (config iran.long_only) must drop any SHORT signal
+    for s in sigs:
+        if s.side is Side.SHORT:
+            # published as a forecast: flagged, and with NO position to enter
+            assert s.forecast_only
+            assert s.position_units == 0 and s.position_notional == 0 and s.risk_amount == 0
+        else:
+            assert not s.forecast_only
+
+
+def test_iran_short_mode_off(monkeypatch):
+    from quantaura import engine
+    settings = Settings.load()
+    settings.cfg.setdefault("iran", {})["short_mode"] = "off"
+    monkeypatch.setattr(engine.data_mod, "get_ohlcv", lambda *a, **k: _iran_df())
+    sigs = engine.scan_symbol("price_dollar_rl", AssetClass.IRAN, settings, publish_only=False)
     assert all(s.side is Side.LONG for s in sigs)
+
+
+def test_forecast_card_renders():
+    from quantaura.formatting import format_signal
+    s = Signal(symbol="geram18", asset_class=AssetClass.IRAN, strategy="trend_breakout",
+               side=Side.SHORT, entry=800000, stop=830000, target=740000,
+               risk_per_unit=30000, reward_per_unit=60000, rr_ratio=2.0,
+               forecast_only=True, confidence=0.6)
+    txt = format_signal(s, md=False)
+    assert "Downside forecast" in txt and "buy lower" in txt
+    assert "740" in txt          # the pullback target appears

@@ -26,12 +26,52 @@ def _bar(conf: float, width: int = 10) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+def _label(sig: Signal) -> str:
+    name = IRAN_NAMES.get(sig.symbol, sig.symbol)
+    return f"{sig.symbol} — {name}" if name != sig.symbol else sig.symbol
+
+
+def _format_forecast(sig: Signal, md: bool) -> str:
+    """A directional forecast you can't trade (e.g. an Iranian gold/USD short)."""
+    bt = sig.backtest
+    lines = [
+        f"📉 *Downside forecast — {_label(sig)}*  ({sig.asset_class.value})",
+        f"Model: `{sig.strategy}`  |  Regime: {sig.regime}  |  TF: {sig.timeframe}",
+        "",
+        f"🔻 Expected pullback toward: `{_fmt_price(sig.target)}`",
+        f"⛔ Forecast invalidated above: `{_fmt_price(sig.stop)}`",
+        f"📍 Current level: `{_fmt_price(sig.entry)}`  |  ATR {_fmt_price(sig.atr)}",
+        "",
+        "💡 You likely can't short this market. Use it to:",
+        f"   • wait and *buy lower* near `{_fmt_price(sig.target)}`, or",
+        "   • take profit on holdings / hold off buying for now.",
+        "",
+        f"📊 Backtest of this downside setup: {bt.trades} trades | "
+        f"hit {bt.win_rate*100:.0f}% | exp {bt.expectancy_R:+.2f}R",
+    ]
+    if sig.oos.trades > 0:
+        lines.append(f"🧪 Out-of-sample: {sig.oos.trades} | hit {sig.oos.win_rate*100:.0f}%")
+    lines.append(f"🎲 Reaches the level (model): {sig.montecarlo.win_prob*100:.0f}% "
+                 f"| P(played out) {sig.montecarlo.prob_profitable*100:.0f}%")
+    if sig.confluence > 1:
+        lines.append(f"🔗 {sig.confluence} strategies agree on the downside")
+    lines.append(f"🔆 Confidence: {_bar(sig.confidence)} {sig.confidence*100:.0f}%")
+    lines.append("")
+    lines.append("🇮🇷 Tehran free-market price (tgju.org). Heavily policy/news-driven — "
+                 "a guide to direction, not a tradeable short.")
+    lines.append("")
+    lines.append(_DISCLAIMER)
+    text = "\n".join(lines)
+    return text if md else text.replace("*", "").replace("`", "")
+
+
 def format_signal(sig: Signal, md: bool = True) -> str:
+    if sig.forecast_only:
+        return _format_forecast(sig, md)
     side_icon = "🟢 LONG" if sig.side is Side.LONG else "🔴 SHORT"
     bt = sig.backtest
     lines = []
-    name = IRAN_NAMES.get(sig.symbol, sig.symbol)
-    label = f"{sig.symbol} — {name}" if name != sig.symbol else sig.symbol
+    label = _label(sig)
     title = f"{side_icon}  *{label}*  ({sig.asset_class.value})"
     lines.append(title)
     lines.append(f"Strategy: `{sig.strategy}`  |  Regime: {sig.regime}  |  TF: {sig.timeframe}")

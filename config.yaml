@@ -45,7 +45,14 @@ universe:
 # published for this class. These markets are heavily policy/news-driven —
 # quant signals are educational only.
 iran:
-  long_only: true
+  # What to do with SHORT (downside) signals on Iranian gold/USD, which
+  # retail usually can't actually short:
+  #   forecast = publish them as a "downside forecast" (no position to
+  #              enter) so you know how far price may fall — use it to time
+  #              your buys or take profit on holdings. (default)
+  #   trade    = treat them as normal tradeable shorts
+  #   off      = drop them entirely (long-only)
+  short_mode: forecast
 
 # --- Data ------------------------------------------------------------
 data:
